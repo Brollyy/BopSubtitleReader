@@ -1,0 +1,19 @@
+{
+  "language": "en",
+  "cues": [
+    {
+      "startSeconds": 1.25,
+      "endSeconds": 3.75,
+      "text": "Single-track JSON object form"
+    },
+    {
+      "startBeat": 24,
+      "endBeat": 28,
+      "text": "Single-track beat cue",
+      "karaoke": [
+        { "beat": 24, "text": "Single" },
+        { "beat": 26, "text": "track" }
+      ]
+    }
+  ]
+}

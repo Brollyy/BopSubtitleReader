@@ -1,0 +1,12 @@
+[
+  {
+    "startSeconds": 0.50,
+    "endSeconds": 2.00,
+    "text": "Root-array JSON cue (no wrapper object)"
+  },
+  {
+    "startBeat": 4,
+    "endBeat": 6,
+    "text": "Root-array beat cue"
+  }
+]

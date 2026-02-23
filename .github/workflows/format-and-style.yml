@@ -1,0 +1,61 @@
+name: Format And Code Style
+
+on:
+  pull_request:
+    branches: ["master"]
+  merge_group:
+
+jobs:
+  whitespace-format:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore BopSubtitleReader.sln -p:SkipGameReferences=true
+
+      - name: Verify whitespace formatting
+        run: dotnet format whitespace BopSubtitleReader.sln --no-restore --verify-no-changes --verbosity minimal --exclude BopSubtitleReader/obj
+
+  code-style:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore BopSubtitleReader.sln -p:SkipGameReferences=true
+
+      - name: Verify code style rules
+        run: dotnet format style BopSubtitleReader.sln --no-restore --verify-no-changes --verbosity minimal --exclude BopSubtitleReader/obj
+
+  analyzers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore BopSubtitleReader.sln -p:SkipGameReferences=true
+
+      - name: Verify analyzer rules
+        run: dotnet format analyzers BopSubtitleReader.sln --no-restore --verify-no-changes --verbosity minimal --exclude BopSubtitleReader/obj

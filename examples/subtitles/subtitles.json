@@ -1,0 +1,38 @@
+{
+  "defaultLanguage": "en",
+  "tracks": {
+    "en": [
+      {
+        "startBeat": 8.0,
+        "endBeat": 12.0,
+        "text": "Beat-timed cue (EN)"
+      },
+      {
+        "startSeconds": 5.5,
+        "endSeconds": 8.25,
+        "text": "Seconds-timed cue (EN)",
+        "karaoke": [
+          { "seconds": 5.5, "text": "Sec" },
+          { "seconds": 6.2, "text": "onds" },
+          { "seconds": 7.0, "text": "mode" }
+        ]
+      },
+      {
+        "startBeat": "16.0",
+        "endBeat": "20.0",
+        "text": "String numeric beat values are accepted",
+        "karaoke": [
+          { "beat": "16.0", "text": "String" },
+          { "beat": "18.0", "text": "beats" }
+        ]
+      }
+    ],
+    "ja": [
+      {
+        "startBeat": 8.0,
+        "endBeat": 12.0,
+        "text": "ビート同期の字幕（JA）"
+      }
+    ]
+  }
+}

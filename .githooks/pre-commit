@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+export DOTNET_CLI_HOME="${DOTNET_CLI_HOME:-/tmp}"
+
+if ! command -v dotnet >/dev/null 2>&1; then
+  echo "dotnet SDK is required for pre-commit formatting." >&2
+  exit 1
+fi
+
+echo "Running dotnet format..."
+dotnet format whitespace BopSubtitleReader.sln --verbosity minimal --exclude BopSubtitleReader/obj --exclude BopSubtitleReader/bin
+dotnet format style BopSubtitleReader.sln --verbosity minimal --exclude BopSubtitleReader/obj --exclude BopSubtitleReader/bin
+dotnet format analyzers BopSubtitleReader.sln --verbosity minimal --exclude BopSubtitleReader/obj --exclude BopSubtitleReader/bin
+
+git add -u
+
+echo "Formatting complete."

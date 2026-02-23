@@ -1,0 +1,32 @@
+using System.Collections.Generic;
+using System.Linq;
+using BopSubtitleReader.Core;
+
+namespace BopSubtitleReader.Parser;
+
+public sealed class SubtitleParserStrategy
+{
+	private static readonly ClassLogger Log = ClassLogger.GetForClass<SubtitleParserStrategy>();
+
+	private readonly List<ISubtitleParser> _parsers =
+	[
+		new SrtSubtitleParser(),
+		new AssSubtitleParser(),
+		new JsonSubtitleParser()
+	];
+
+	public bool TryParse(SubtitleSourceAsset asset, out SubtitleCatalog catalog)
+	{
+		foreach (var parser in _parsers.Where(parser => parser.CanParse(asset)))
+		{
+			if (parser.TryParse(asset, out catalog))
+			{
+				return true;
+			}
+		}
+
+		catalog = new SubtitleCatalog();
+		Log.Warn($"No parser could read subtitle asset '{asset.Source}'.");
+		return false;
+	}
+}

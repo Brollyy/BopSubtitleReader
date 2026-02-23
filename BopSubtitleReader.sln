@@ -1,0 +1,16 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BopSubtitleReader", "BopSubtitleReader\BopSubtitleReader.csproj", "{F40721AE-D8E1-4FCE-9FB0-1223261EA36F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F40721AE-D8E1-4FCE-9FB0-1223261EA36F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F40721AE-D8E1-4FCE-9FB0-1223261EA36F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F40721AE-D8E1-4FCE-9FB0-1223261EA36F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F40721AE-D8E1-4FCE-9FB0-1223261EA36F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
