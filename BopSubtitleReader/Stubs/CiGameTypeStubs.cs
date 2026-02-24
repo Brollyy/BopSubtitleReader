@@ -92,4 +92,71 @@ public static class TempoSceneManager
 #pragma warning restore CA1051
 #pragma warning restore CA1050
 #pragma warning restore CA1822
+
+namespace TMPro
+{
+#pragma warning disable CA1050
+#pragma warning disable CA1051
+#pragma warning disable CA1707
+#pragma warning disable CA1822
+
+	[System.Flags]
+	public enum FontStyles
+	{
+		Normal = 0,
+		Bold = 1,
+		Italic = 2,
+	}
+
+	public enum TextAlignmentOptions
+	{
+		TopLeft = 257,
+		Top = 258,
+		TopRight = 260,
+		Left = 513,
+		Center = 514,
+		Right = 516,
+		BottomLeft = 1025,
+		Bottom = 1026,
+		BottomRight = 1028,
+	}
+
+	public class TMP_FontAsset : UnityEngine.ScriptableObject
+	{
+		public UnityEngine.Font? sourceFontFile { get; set; }
+		public System.Collections.Generic.List<TMP_FontAsset>? fallbackFontAssetTable { get; set; }
+	}
+
+	public struct TMP_CharacterInfo
+	{
+		public UnityEngine.Vector3 bottomLeft;
+		public UnityEngine.Vector3 topRight;
+		public bool isVisible;
+	}
+
+	public class TMP_TextInfo
+	{
+		public int characterCount;
+		public TMP_CharacterInfo[] characterInfo = [];
+	}
+
+	public class TextMeshProUGUI : UnityEngine.MonoBehaviour
+	{
+		public string text { get; set; } = string.Empty;
+		public float fontSize { get; set; }
+		public TMP_FontAsset? font { get; set; }
+		public UnityEngine.Color color { get; set; }
+		public FontStyles fontStyle { get; set; }
+		public TextAlignmentOptions alignment { get; set; }
+		public bool enableWordWrapping { get; set; }
+		public bool richText { get; set; }
+		public TMP_TextInfo textInfo { get; } = new TMP_TextInfo();
+	}
+
+#pragma warning restore CA1051
+#pragma warning restore CA1050
+#pragma warning restore CA1707
+#pragma warning restore CA1822
+}
+
 #endif
