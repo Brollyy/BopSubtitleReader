@@ -23,8 +23,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private bool _timingResolved;
 	private string _displayText = string.Empty;
 	private string _displayStyleKey = string.Empty;
-	private bool _loggedKaraokeAdapterUnavailable;
-	private bool _loggedKaraokeModeValue;
 	public bool HasActiveSession => _track is not null && _loader is not null && _config is not null;
 
 	public static SubtitleRuntimeController Instance
@@ -52,21 +50,14 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
-		_loggedKaraokeAdapterUnavailable = false;
-		_loggedKaraokeModeValue = false;
 		_overlay.Hide();
 		var karaokeCueCount = track.Cues.Count(c => c.KaraokeSegments.Count > 0);
 		Log.Info($"Subtitle session started with {track.Cues.Count} cue(s), {karaokeCueCount} karaoke cue(s).");
-		if (karaokeCueCount > 0)
-		{
-			string mode = NormalizeKaraokeMode(config.KaraokeMode.Value);
-			if (mode is "auto" or "force")
-			{
-				bool available = _karaoke?.IsAvailable == true;
-				string reason = _karaoke?.UnavailabilityReason ?? "Karaoke adapter instance missing.";
-				Log.Info($"Karaoke indicator prewarm result: available={available}, reason='{reason}'.");
-			}
-		}
+		if (karaokeCueCount <= 0) return;
+		var mode = NormalizeKaraokeMode(config.KaraokeMode.Value);
+		if (mode is not ("auto" or "force")) return;
+		_karaoke?.EnsureInitialized();
+		Log.Info($"Karaoke indicator initialized.");
 	}
 
 	public void StopSession()
@@ -77,8 +68,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
-		_loggedKaraokeAdapterUnavailable = false;
-		_loggedKaraokeModeValue = false;
 		_karaoke?.Hide();
 		_overlay.Hide();
 	}
@@ -156,23 +145,11 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			return;
 		}
 
-		if (!_loggedKaraokeModeValue)
-		{
-			Log.Info($"Karaoke mode resolved to '{mode}'.");
-			_loggedKaraokeModeValue = true;
-		}
-
 		if (_karaoke?.IsAvailable == true)
 		{
-			_karaoke.Show(cue, beat, _overlay);
+			_karaoke.UpdateDisplay(cue, beat, _overlay);
 			SetDisplayText(cue.Text, cue.Style);
 			return;
-		}
-
-		if (!_loggedKaraokeAdapterUnavailable)
-		{
-			Log.Warn($"Karaoke requested but indicator is unavailable (mode={mode}).");
-			_loggedKaraokeAdapterUnavailable = true;
 		}
 
 		if (!forceKaraoke)

@@ -14,23 +14,10 @@ public sealed class KaraokeIndicatorAdapter
 	private SpriteRenderer? _renderer;
 	private Sprite? _bopSprite;
 	private bool _initialized;
-	private bool _available;
-	private bool _loggedMissingMainCamera;
-	private bool _loggedFirstShow;
-	private string _unavailabilityReason = "Not initialized.";
 
-	public bool IsAvailable
-	{
-		get
-		{
-			EnsureInitialized();
-			return _available;
-		}
-	}
+	public bool IsAvailable { get; private set; }
 
-	public string UnavailabilityReason => _available ? "Available" : _unavailabilityReason;
-
-	public void Show(SubtitleCue cue, float beat, TmpSubtitleOverlay? overlay)
+	public void UpdateDisplay(SubtitleCue cue, float beat, TmpSubtitleOverlay? overlay)
 	{
 		if (!EnsureInitialized() || _indicatorObject is null || _renderer is null || _bopSprite is null)
 		{
@@ -40,21 +27,10 @@ public sealed class KaraokeIndicatorAdapter
 		var camera = Camera.main;
 		if (camera is null)
 		{
-			if (!_loggedMissingMainCamera)
-			{
-				Log.Warn("Karaoke indicator cannot render because Camera.main is null.");
-				_loggedMissingMainCamera = true;
-			}
 			return;
 		}
 
-		_indicatorObject.SetActive(true);
-		_renderer.sprite = _bopSprite;
-		if (!_loggedFirstShow)
-		{
-			Log.Info("Karaoke indicator is active.");
-			_loggedFirstShow = true;
-		}
+		Show();
 
 		var activeSegmentIndex = -1;
 		for (var i = 0; i < cue.KaraokeSegments.Count; i++)
@@ -68,7 +44,7 @@ public sealed class KaraokeIndicatorAdapter
 
 		if (activeSegmentIndex < 0)
 		{
-			_indicatorObject.SetActive(false);
+			Hide();
 			return;
 		}
 
@@ -127,31 +103,33 @@ public sealed class KaraokeIndicatorAdapter
 		return -1;
 	}
 
-	public void Hide()
+	public void Show()
 	{
-		if (_indicatorObject is not null && _indicatorObject.activeSelf)
-		{
-			_indicatorObject.SetActive(false);
-		}
+		if (_indicatorObject is null || _indicatorObject.activeSelf) return;
+		Log.Trace("Karaoke indicator showing.");
+		_indicatorObject.SetActive(true);
 	}
 
-	private bool EnsureInitialized()
+	public void Hide()
+	{
+		if (_indicatorObject is null || !_indicatorObject.activeSelf) return;
+		Log.Trace("Karaoke indicator is hidden.");
+		_indicatorObject.SetActive(false);
+	}
+
+	public bool EnsureInitialized()
 	{
 		if (_initialized)
 		{
-			return _available;
+			return IsAvailable;
 		}
 
 		_initialized = true;
 		_bopSprite = LoadBundledSprite();
 		if (_bopSprite is null)
 		{
-			if (string.IsNullOrWhiteSpace(_unavailabilityReason))
-			{
-				_unavailabilityReason = "Could not load karaoke sprite.";
-			}
-			Log.Warn($"Could not load bundled karaoke sprite. {_unavailabilityReason}");
-			_available = false;
+			Log.Warn($"Could not load bundled karaoke ball sprite.");
+			IsAvailable = false;
 			return false;
 		}
 
@@ -165,13 +143,13 @@ public sealed class KaraokeIndicatorAdapter
 
 		_indicatorObject = host;
 		_indicatorObject.SetActive(false);
-		_available = true;
-		_unavailabilityReason = "Available";
-		Log.Info("Custom karaoke indicator initialized from bundled bop sprite.");
+		IsAvailable = true;
+
+		Log.Info("Custom karaoke indicator initialized from bundled sprite.");
 		return true;
 	}
 
-	private Sprite? LoadBundledSprite()
+	private static Sprite? LoadBundledSprite()
 	{
 		try
 		{
@@ -182,7 +160,6 @@ public sealed class KaraokeIndicatorAdapter
 				var spritePath = Path.Combine(pluginDirectory, "assets", "karaoke_bop.png");
 				if (!File.Exists(spritePath))
 				{
-					_unavailabilityReason = $"Bundled karaoke sprite not found. Searched embedded resource and '{spritePath}'.";
 					return null;
 				}
 
@@ -193,7 +170,6 @@ public sealed class KaraokeIndicatorAdapter
 			if (!texture.LoadImage(pngBytes))
 			{
 				UnityEngine.Object.Destroy(texture);
-				_unavailabilityReason = "Failed to decode karaoke sprite png bytes.";
 				return null;
 			}
 
@@ -202,9 +178,8 @@ public sealed class KaraokeIndicatorAdapter
 			var rect = new Rect(0f, 0f, texture.width, texture.height);
 			return Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f);
 		}
-		catch (Exception ex)
+		catch (Exception)
 		{
-			_unavailabilityReason = $"Failed loading karaoke sprite: {ex.Message}";
 			return null;
 		}
 	}

@@ -6,6 +6,8 @@ using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.TextCore.Text;
+using Object = UnityEngine.Object;
 
 namespace BopSubtitleReader.Core;
 
@@ -17,27 +19,10 @@ public sealed class TmpSubtitleOverlay
 	private bool _available;
 	private GameObject? _host;
 	private Component? _tmpComponent;
-	private PropertyInfo? _textProperty;
-	private PropertyInfo? _fontSizeProperty;
-	private PropertyInfo? _fontProperty;
-	private Type? _fontAssetType;
-	private PropertyInfo? _fontAssetSourceFileProperty;
-	private PropertyInfo? _fallbackFontAssetTableProperty;
-	private PropertyInfo? _colorProperty;
-	private PropertyInfo? _fontStyleProperty;
-	private PropertyInfo? _alignmentProperty;
-	private PropertyInfo? _horizontalAlignmentProperty;
-	private PropertyInfo? _verticalAlignmentProperty;
-	private PropertyInfo? _textInfoProperty;
-	private PropertyInfo? _textInfoCharCountProperty;
-	private PropertyInfo? _textInfoCharInfoArrayProperty;
-	private FieldInfo? _charInfoBottomLeftField;
-	private FieldInfo? _charInfoTopRightField;
-	private FieldInfo? _charInfoIsVisibleField;
 	private OverlayStyleState _defaultStyle = OverlayStyleState.CreateDefault();
-	private readonly Dictionary<string, UnityEngine.Object> _fontAssetByKey = new(StringComparer.OrdinalIgnoreCase);
-	private readonly List<UnityEngine.Object> _fontAssets = [];
-	private UnityEngine.Object? _defaultFontAsset;
+	private readonly Dictionary<string, Object> _fontAssetByKey = new(StringComparer.OrdinalIgnoreCase);
+	private readonly List<Object> _fontAssets = [];
+	private Object? _defaultFontAsset;
 
 	public void SetText(string text, SubtitleCueStyle? style)
 	{
@@ -93,7 +78,7 @@ public sealed class TmpSubtitleOverlay
 			return null;
 		}
 
-		int charCount = Convert.ToInt32(_textInfoCharCountProperty.GetValue(textInfo) ?? 0, CultureInfo.InvariantCulture);
+		var charCount = Convert.ToInt32(_textInfoCharCountProperty.GetValue(textInfo) ?? 0, CultureInfo.InvariantCulture);
 		if (charCount == 0)
 		{
 			return null;
@@ -111,12 +96,12 @@ public sealed class TmpSubtitleOverlay
 			return null;
 		}
 
-		float sumX = 0f;
-		float minY = float.MaxValue;
-		int visibleCount = 0;
-		int charEnd = charStart + charLength;
+		var sumX = 0f;
+		var minY = float.MaxValue;
+		var visibleCount = 0;
+		var charEnd = charStart + charLength;
 
-		for (int i = charStart; i < Math.Min(charEnd, charCount); i++)
+		for (var i = charStart; i < Math.Min(charEnd, charCount); i++)
 		{
 			if (i >= charInfoArray.Length)
 			{
@@ -129,8 +114,8 @@ public sealed class TmpSubtitleOverlay
 				continue;
 			}
 
-			bool isVisible = _charInfoIsVisibleField is not null
-				&& (bool)(_charInfoIsVisibleField.GetValue(charInfo) ?? false);
+			var isVisible = _charInfoIsVisibleField is not null
+							&& (bool)(_charInfoIsVisibleField.GetValue(charInfo) ?? false);
 			if (!isVisible)
 			{
 				continue;
@@ -139,11 +124,11 @@ public sealed class TmpSubtitleOverlay
 			var bottomLeft = (Vector3)(_charInfoBottomLeftField.GetValue(charInfo) ?? Vector3.zero);
 			var topRight = (Vector3)(_charInfoTopRightField.GetValue(charInfo) ?? Vector3.zero);
 
-			float localCenterX = (bottomLeft.x + topRight.x) * 0.5f;
-			float localBottomY = bottomLeft.y;
+			var localCenterX = (bottomLeft.x + topRight.x) * 0.5f;
+			var localBottomY = bottomLeft.y;
 
 			var worldPos = _tmpComponent.transform.TransformPoint(new Vector3(localCenterX, localBottomY, 0f));
-			var screenPos = RectTransformUtility.WorldToScreenPoint(null, worldPos);
+			var screenPos = Camera.main?.WorldToScreenPoint(worldPos) ?? worldPos;
 
 			sumX += screenPos.x;
 			if (screenPos.y < minY)
@@ -212,7 +197,7 @@ public sealed class TmpSubtitleOverlay
 		_textProperty = tmpType.GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
 		_fontSizeProperty = tmpType.GetProperty("fontSize", BindingFlags.Public | BindingFlags.Instance);
 		_fontProperty = tmpType.GetProperty("font", BindingFlags.Public | BindingFlags.Instance);
-		_fontAssetType = _fontProperty?.PropertyType;
+		FontAsset
 		_fontAssetSourceFileProperty = _fontAssetType?.GetProperty("sourceFontFile", BindingFlags.Public | BindingFlags.Instance);
 		_fallbackFontAssetTableProperty = _fontAssetType?.GetProperty("fallbackFontAssetTable", BindingFlags.Public | BindingFlags.Instance);
 		_colorProperty = tmpType.GetProperty("color", BindingFlags.Public | BindingFlags.Instance);
@@ -235,7 +220,7 @@ public sealed class TmpSubtitleOverlay
 		}
 
 		var canvasObject = new GameObject("BOP_SubtitleCanvas");
-		UnityEngine.Object.DontDestroyOnLoad(canvasObject);
+		Object.DontDestroyOnLoad(canvasObject);
 
 		var canvas = canvasObject.AddComponent(canvasType);
 		SetEnumProperty(canvasType, canvas, "renderMode", "ScreenSpaceOverlay");
@@ -410,18 +395,12 @@ public sealed class TmpSubtitleOverlay
 			return;
 		}
 
-		UnityEngine.Object[] loadedAssets = Resources.FindObjectsOfTypeAll(_fontAssetType);
-		for (var i = 0; i < loadedAssets.Length; i++)
+		var loadedAssets = Resources.FindObjectsOfTypeAll(_fontAssetType);
+		foreach (var asset in loadedAssets)
 		{
-			UnityEngine.Object asset = loadedAssets[i];
-			if (asset is null)
-			{
-				continue;
-			}
-
 			_fontAssets.Add(asset);
 			RegisterFontAssetKey(asset.name, asset);
-			string? sourceFontName = ReadSourceFontName(asset);
+			var sourceFontName = ReadSourceFontName(asset);
 			if (!string.IsNullOrWhiteSpace(sourceFontName))
 			{
 				RegisterFontAssetKey(sourceFontName!, asset);
@@ -436,7 +415,7 @@ public sealed class TmpSubtitleOverlay
 			return;
 		}
 
-		UnityEngine.Object? selected = SelectFallbackFontAsset();
+		var selected = SelectFallbackFontAsset();
 		if (selected is null)
 		{
 			Log.Warn("No TMP font asset found for subtitle overlay.");
@@ -456,7 +435,7 @@ public sealed class TmpSubtitleOverlay
 			return;
 		}
 
-		UnityEngine.Object? selected = null;
+		Object? selected = null;
 		if (!string.IsNullOrWhiteSpace(requestedFontName))
 		{
 			selected = ResolveFontAsset(requestedFontName!);
@@ -475,7 +454,7 @@ public sealed class TmpSubtitleOverlay
 		_fontProperty.SetValue(_tmpComponent, selected);
 	}
 
-	private UnityEngine.Object? SelectFallbackFontAsset()
+	private Object? SelectFallbackFontAsset()
 	{
 		string[] preferred = [
 			"NotInter-Regular SDF",
@@ -488,9 +467,9 @@ public sealed class TmpSubtitleOverlay
 			"Binggrae SDF"
 		];
 
-		for (var i = 0; i < preferred.Length; i++)
+		foreach (var font in preferred)
 		{
-			UnityEngine.Object? resolved = ResolveFontAsset(preferred[i]);
+			var resolved = ResolveFontAsset(font);
 			if (resolved is not null)
 			{
 				return resolved;
@@ -500,7 +479,7 @@ public sealed class TmpSubtitleOverlay
 		return _fontAssets.Count > 0 ? _fontAssets[0] : null;
 	}
 
-	private void ConfigureFallbackFonts(UnityEngine.Object primaryFontAsset)
+	private void ConfigureFallbackFonts(Object primaryFontAsset)
 	{
 		if (_fontAssetType is null || _fallbackFontAssetTableProperty is null || !_fallbackFontAssetTableProperty.CanWrite)
 		{
@@ -508,12 +487,12 @@ public sealed class TmpSubtitleOverlay
 		}
 
 		string[] cjkFallbacks = ["MPLUSRounded1c-Regular SDF", "TaiwanPearl-Regular SDF", "Binggrae SDF"];
-		IList fallbackList = (IList)(Activator.CreateInstance(typeof(List<>).MakeGenericType(_fontAssetType))
-			?? throw new InvalidOperationException("Failed to create TMP fallback list."));
+		var fallbackList = (IList)(Activator.CreateInstance(typeof(List<>).MakeGenericType(_fontAssetType))
+								   ?? throw new InvalidOperationException("Failed to create TMP fallback list."));
 
-		for (var i = 0; i < cjkFallbacks.Length; i++)
+		foreach (var font in cjkFallbacks)
 		{
-			UnityEngine.Object? fallback = ResolveFontAsset(cjkFallbacks[i]);
+			var fallback = ResolveFontAsset(font);
 			if (fallback is null || ReferenceEquals(fallback, primaryFontAsset) || fallbackList.Contains(fallback))
 			{
 				continue;
@@ -529,10 +508,10 @@ public sealed class TmpSubtitleOverlay
 		}
 	}
 
-	private UnityEngine.Object? ResolveFontAsset(string requestedFontName)
+	private Object? ResolveFontAsset(string requestedFontName)
 	{
-		string normalized = NormalizeFontKey(requestedFontName);
-		if (_fontAssetByKey.TryGetValue(normalized, out UnityEngine.Object? exact))
+		var normalized = NormalizeFontKey(requestedFontName);
+		if (_fontAssetByKey.TryGetValue(normalized, out var exact))
 		{
 			return exact;
 		}
@@ -542,19 +521,18 @@ public sealed class TmpSubtitleOverlay
 			return null;
 		}
 
-		for (var i = 0; i < _fontAssets.Count; i++)
+		foreach (var candidate in _fontAssets)
 		{
-			UnityEngine.Object candidate = _fontAssets[i];
-			string candidateKey = NormalizeFontKey(candidate.name);
+			var candidateKey = NormalizeFontKey(candidate.name);
 			if (candidateKey.Contains(normalized) || normalized.Contains(candidateKey))
 			{
 				return candidate;
 			}
 
-			string? sourceFontName = ReadSourceFontName(candidate);
+			var sourceFontName = ReadSourceFontName(candidate);
 			if (!string.IsNullOrWhiteSpace(sourceFontName))
 			{
-				string sourceKey = NormalizeFontKey(sourceFontName!);
+				var sourceKey = NormalizeFontKey(sourceFontName!);
 				if (sourceKey.Contains(normalized) || normalized.Contains(sourceKey))
 				{
 					return candidate;
@@ -565,31 +543,32 @@ public sealed class TmpSubtitleOverlay
 		return null;
 	}
 
-	private string? ReadSourceFontName(UnityEngine.Object fontAsset)
+	private string? ReadSourceFontName(Object fontAsset)
 	{
 		if (_fontAssetSourceFileProperty is null)
 		{
 			return null;
 		}
 
-		object? source = _fontAssetSourceFileProperty.GetValue(fontAsset);
-		return source is UnityEngine.Object sourceObject ? sourceObject.name : null;
+		var source = _fontAssetSourceFileProperty.GetValue(fontAsset);
+		return source is Object sourceObject ? sourceObject.name : null;
 	}
 
-	private void RegisterFontAssetKey(string key, UnityEngine.Object asset)
+	private void RegisterFontAssetKey(string key, Object asset)
 	{
-		string normalized = NormalizeFontKey(key);
+		var normalized = NormalizeFontKey(key);
 		if (normalized.Length == 0 || _fontAssetByKey.ContainsKey(normalized))
 		{
 			return;
 		}
 
+		Log.Trace($"Registering font asset key: {key}");
 		_fontAssetByKey[normalized] = asset;
 	}
 
 	private static string NormalizeFontKey(string key)
 	{
-		return new string(key.Where(ch => char.IsLetterOrDigit(ch)).ToArray()).ToLowerInvariant();
+		return new string(key.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 	}
 
 	private static float? ReadFloat(PropertyInfo? property, object target)
@@ -669,7 +648,7 @@ public sealed class TmpSubtitleOverlay
 			return false;
 		}
 
-		value = Convert.ToInt32(enumValue, System.Globalization.CultureInfo.InvariantCulture);
+		value = Convert.ToInt32(enumValue, CultureInfo.InvariantCulture);
 		return true;
 	}
 
