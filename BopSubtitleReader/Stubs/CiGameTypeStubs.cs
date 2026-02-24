@@ -24,12 +24,19 @@ public sealed class MixtapeLoaderCustom : MonoBehaviour
 {
 	public int total;
 	public JukeboxScript? jukebox;
+	public Camera? cameraScript;
 	public SceneKey[] sceneKeys = [SceneKey.MixtapeEditor];
 }
 
 public sealed class JukeboxScript : MonoBehaviour
 {
 	public float CurrentBeat { get; set; }
+
+	public float SecondsToBeats(double seconds)
+	{
+		// CI stub only — not used at runtime; actual implementation provided by Assembly-CSharp.
+		return (float)seconds;
+	}
 }
 
 public sealed class MixtapeEditorScript

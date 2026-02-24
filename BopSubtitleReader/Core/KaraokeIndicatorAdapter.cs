@@ -15,7 +15,7 @@ public sealed class KaraokeIndicatorAdapter
 	private Sprite? _bopSprite;
 	private bool _initialized;
 	private bool _available;
-	private bool _loggedMissingMainCamera;
+	private bool _loggedMissingCamera;
 	private bool _loggedFirstShow;
 	private string _unavailabilityReason = "Not initialized.";
 
@@ -30,20 +30,20 @@ public sealed class KaraokeIndicatorAdapter
 
 	public string UnavailabilityReason => _available ? "Available" : _unavailabilityReason;
 
-	public void Show(SubtitleCue cue, float beat)
+	public void Show(SubtitleCue cue, float beat, Camera? camera = null)
 	{
 		if (!EnsureInitialized() || _indicatorObject is null || _renderer is null || _bopSprite is null)
 		{
 			return;
 		}
 
-		var camera = Camera.main;
+		camera ??= Camera.main;
 		if (camera is null)
 		{
-			if (!_loggedMissingMainCamera)
+			if (!_loggedMissingCamera)
 			{
-				Log.Warn("Karaoke indicator cannot render because Camera.main is null.");
-				_loggedMissingMainCamera = true;
+				Log.Warn("Karaoke indicator cannot render because no active camera is available.");
+				_loggedMissingCamera = true;
 			}
 			return;
 		}

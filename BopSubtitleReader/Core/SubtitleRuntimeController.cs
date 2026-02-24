@@ -12,6 +12,8 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private static SubtitleRuntimeController? _instance;
 	private static readonly AccessTools.FieldRef<MixtapeLoaderCustom, JukeboxScript?> JukeboxRef =
 		AccessTools.FieldRefAccess<MixtapeLoaderCustom, JukeboxScript?>("jukebox");
+	private static readonly AccessTools.FieldRef<MixtapeLoaderCustom, Camera?> CameraScriptRef =
+		AccessTools.FieldRefAccess<MixtapeLoaderCustom, Camera?>("cameraScript");
 
 	private readonly TmpSubtitleOverlay _overlay = new();
 
@@ -162,7 +164,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		if (_karaoke?.IsAvailable == true)
 		{
-			_karaoke.Show(cue, beat);
+			_karaoke.Show(cue, beat, GetActiveCamera());
 			SetDisplayText(cue.Text, cue.Style);
 			return;
 		}
@@ -213,6 +215,17 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			? style.FontSize.Value.ToString(CultureInfo.InvariantCulture)
 			: string.Empty;
 		return $"{style.FontName}|{fontSize}|{style.ColorHexRgba}|{style.Bold}|{style.Italic}|{style.Alignment}";
+	}
+
+	private Camera? GetActiveCamera()
+	{
+		if (_loader is null)
+		{
+			return Camera.main;
+		}
+
+		var cameraScript = CameraScriptRef(_loader);
+		return cameraScript ?? Camera.main;
 	}
 
 	private static void ResolveCueTiming(SubtitleTrack track, JukeboxScript jukebox)
