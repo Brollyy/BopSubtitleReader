@@ -30,6 +30,11 @@ public sealed class MixtapeLoaderCustom : MonoBehaviour
 public sealed class JukeboxScript : MonoBehaviour
 {
 	public float CurrentBeat { get; set; }
+
+	public float SecondsToBeats(double seconds)
+	{
+		return (float)seconds;
+	}
 }
 
 public sealed class MixtapeEditorScript
