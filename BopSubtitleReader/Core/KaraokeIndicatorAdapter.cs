@@ -30,7 +30,7 @@ public sealed class KaraokeIndicatorAdapter
 
 	public string UnavailabilityReason => _available ? "Available" : _unavailabilityReason;
 
-	public void Show(SubtitleCue cue, float beat)
+	public void Show(SubtitleCue cue, float beat, TmpSubtitleOverlay? overlay)
 	{
 		if (!EnsureInitialized() || _indicatorObject is null || _renderer is null || _bopSprite is null)
 		{
@@ -56,20 +56,40 @@ public sealed class KaraokeIndicatorAdapter
 			_loggedFirstShow = true;
 		}
 
-		var activeMarkerBeat = cue.StartBeat;
-		foreach (var segment in cue.KaraokeSegments)
+		var activeSegmentIndex = -1;
+		for (var i = 0; i < cue.KaraokeSegments.Count; i++)
 		{
-			var markerBeat = segment.Beat ?? cue.StartBeat;
+			var markerBeat = cue.KaraokeSegments[i].Beat ?? cue.StartBeat;
 			if (beat >= markerBeat)
 			{
-				activeMarkerBeat = markerBeat;
+				activeSegmentIndex = i;
 			}
 		}
 
+		if (activeSegmentIndex < 0)
+		{
+			_indicatorObject.SetActive(false);
+			return;
+		}
+
+		var activeSegment = cue.KaraokeSegments[activeSegmentIndex];
+		var activeMarkerBeat = activeSegment.Beat ?? cue.StartBeat;
 		var phase = Mathf.Clamp01(beat - activeMarkerBeat);
 		var pulse = Mathf.Abs(Mathf.Sin(phase * Mathf.PI * 2f));
 
-		var worldPosition = camera.ViewportToWorldPoint(new Vector3(0.5f, 0.14f, 4f));
+		var viewportX = 0.5f;
+		var viewportY = 0.14f;
+		var charStart = FindSegmentCharStart(cue, activeSegmentIndex);
+		var segCenter = charStart >= 0
+			? overlay?.GetSegmentViewportCenter(charStart, activeSegment.Text.Length)
+			: null;
+		if (segCenter.HasValue)
+		{
+			viewportX = segCenter.Value.x;
+			viewportY = segCenter.Value.y;
+		}
+
+		var worldPosition = camera.ViewportToWorldPoint(new Vector3(viewportX, viewportY, 4f));
 		if (camera.orthographic)
 		{
 			worldPosition.z = 0f;
@@ -77,6 +97,34 @@ public sealed class KaraokeIndicatorAdapter
 
 		_indicatorObject.transform.position = worldPosition + new Vector3(0f, pulse * 0.15f, 0f);
 		_indicatorObject.transform.localScale = Vector3.one * (0.35f + pulse * 0.1f);
+	}
+
+	private static int FindSegmentCharStart(SubtitleCue cue, int activeSegmentIndex)
+	{
+		var searchFrom = 0;
+		for (var i = 0; i <= activeSegmentIndex; i++)
+		{
+			var segText = cue.KaraokeSegments[i].Text;
+			if (string.IsNullOrEmpty(segText))
+			{
+				continue;
+			}
+
+			var found = cue.Text.IndexOf(segText, searchFrom, StringComparison.Ordinal);
+			if (found < 0)
+			{
+				return -1;
+			}
+
+			if (i == activeSegmentIndex)
+			{
+				return found;
+			}
+
+			searchFrom = found + segText.Length;
+		}
+
+		return -1;
 	}
 
 	public void Hide()

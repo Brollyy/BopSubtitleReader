@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
@@ -27,6 +28,12 @@ public sealed class TmpSubtitleOverlay
 	private PropertyInfo? _alignmentProperty;
 	private PropertyInfo? _horizontalAlignmentProperty;
 	private PropertyInfo? _verticalAlignmentProperty;
+	private PropertyInfo? _textInfoProperty;
+	private PropertyInfo? _textInfoCharCountProperty;
+	private PropertyInfo? _textInfoCharInfoArrayProperty;
+	private FieldInfo? _charInfoBottomLeftField;
+	private FieldInfo? _charInfoTopRightField;
+	private FieldInfo? _charInfoIsVisibleField;
 	private OverlayStyleState _defaultStyle = OverlayStyleState.CreateDefault();
 	private readonly Dictionary<string, UnityEngine.Object> _fontAssetByKey = new(StringComparer.OrdinalIgnoreCase);
 	private readonly List<UnityEngine.Object> _fontAssets = [];
@@ -58,6 +65,127 @@ public sealed class TmpSubtitleOverlay
 		{
 			_host.SetActive(false);
 		}
+	}
+
+	/// <summary>
+	/// Returns the viewport-space center X and bottom Y of the character range [charStart, charStart+charLength)
+	/// within the currently rendered text, or null if the information is unavailable.
+	/// </summary>
+	public Vector2? GetSegmentViewportCenter(int charStart, int charLength)
+	{
+		if (!_available || _tmpComponent is null || _textInfoProperty is null)
+		{
+			return null;
+		}
+
+		var textInfo = _textInfoProperty.GetValue(_tmpComponent);
+		if (textInfo is null)
+		{
+			return null;
+		}
+
+		var textInfoType = textInfo.GetType();
+		_textInfoCharCountProperty ??= textInfoType.GetProperty("characterCount");
+		_textInfoCharInfoArrayProperty ??= textInfoType.GetProperty("characterInfo");
+
+		if (_textInfoCharCountProperty is null || _textInfoCharInfoArrayProperty is null)
+		{
+			return null;
+		}
+
+		int charCount = Convert.ToInt32(_textInfoCharCountProperty.GetValue(textInfo) ?? 0, CultureInfo.InvariantCulture);
+		if (charCount == 0)
+		{
+			return null;
+		}
+
+		var charInfoArray = _textInfoCharInfoArrayProperty.GetValue(textInfo) as Array;
+		if (charInfoArray is null)
+		{
+			return null;
+		}
+
+		EnsureCharInfoFields(charInfoArray);
+		if (_charInfoBottomLeftField is null || _charInfoTopRightField is null)
+		{
+			return null;
+		}
+
+		float sumX = 0f;
+		float minY = float.MaxValue;
+		int visibleCount = 0;
+		int charEnd = charStart + charLength;
+
+		for (int i = charStart; i < Math.Min(charEnd, charCount); i++)
+		{
+			if (i >= charInfoArray.Length)
+			{
+				break;
+			}
+
+			var charInfo = charInfoArray.GetValue(i);
+			if (charInfo is null)
+			{
+				continue;
+			}
+
+			bool isVisible = _charInfoIsVisibleField is not null
+				&& (bool)(_charInfoIsVisibleField.GetValue(charInfo) ?? false);
+			if (!isVisible)
+			{
+				continue;
+			}
+
+			var bottomLeft = (Vector3)(_charInfoBottomLeftField.GetValue(charInfo) ?? Vector3.zero);
+			var topRight = (Vector3)(_charInfoTopRightField.GetValue(charInfo) ?? Vector3.zero);
+
+			float localCenterX = (bottomLeft.x + topRight.x) * 0.5f;
+			float localBottomY = bottomLeft.y;
+
+			var worldPos = _tmpComponent.transform.TransformPoint(new Vector3(localCenterX, localBottomY, 0f));
+			var screenPos = RectTransformUtility.WorldToScreenPoint(null, worldPos);
+
+			sumX += screenPos.x;
+			if (screenPos.y < minY)
+			{
+				minY = screenPos.y;
+			}
+
+			visibleCount++;
+		}
+
+		if (visibleCount == 0)
+		{
+			return null;
+		}
+
+		return new Vector2(
+			(sumX / visibleCount) / Screen.width,
+			minY / Screen.height);
+	}
+
+	private void EnsureCharInfoFields(Array charInfoArray)
+	{
+		if (_charInfoBottomLeftField is not null)
+		{
+			return;
+		}
+
+		if (charInfoArray.Length == 0)
+		{
+			return;
+		}
+
+		var firstElement = charInfoArray.GetValue(0);
+		if (firstElement is null)
+		{
+			return;
+		}
+
+		var charInfoType = firstElement.GetType();
+		_charInfoBottomLeftField = charInfoType.GetField("bottomLeft");
+		_charInfoTopRightField = charInfoType.GetField("topRight");
+		_charInfoIsVisibleField = charInfoType.GetField("isVisible");
 	}
 
 	private bool EnsureInitialized()
@@ -92,6 +220,7 @@ public sealed class TmpSubtitleOverlay
 		_alignmentProperty = tmpType.GetProperty("alignment", BindingFlags.Public | BindingFlags.Instance);
 		_horizontalAlignmentProperty = tmpType.GetProperty("horizontalAlignment", BindingFlags.Public | BindingFlags.Instance);
 		_verticalAlignmentProperty = tmpType.GetProperty("verticalAlignment", BindingFlags.Public | BindingFlags.Instance);
+		_textInfoProperty = tmpType.GetProperty("textInfo", BindingFlags.Public | BindingFlags.Instance);
 		if (_textProperty is null)
 		{
 			Log.Warn("TMP text property not found. Subtitle overlay disabled.");

@@ -88,6 +88,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		if (_track is null || _config is null || !_config.Enabled.Value)
 		{
 			SetDisplayText(string.Empty, null);
+			_karaoke?.Hide();
 			return;
 		}
 
@@ -150,6 +151,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		if (!hasKaraoke || !karaokeRequested)
 		{
+			_karaoke?.Hide();
 			SetDisplayText(cue.Text, cue.Style);
 			return;
 		}
@@ -162,7 +164,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		if (_karaoke?.IsAvailable == true)
 		{
-			_karaoke.Show(cue, beat);
+			_karaoke.Show(cue, beat, _overlay);
 			SetDisplayText(cue.Text, cue.Style);
 			return;
 		}
