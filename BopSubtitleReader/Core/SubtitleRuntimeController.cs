@@ -56,8 +56,15 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		if (karaokeCueCount <= 0) return;
 		var mode = NormalizeKaraokeMode(config.KaraokeMode.Value);
 		if (mode is not ("auto" or "force")) return;
-		_karaoke?.EnsureInitialized();
-		Log.Info($"Karaoke indicator initialized.");
+		if (_karaoke is not null)
+		{
+			_karaoke.EnsureInitialized();
+			Log.Info("Karaoke indicator initialized.");
+		}
+		else
+		{
+			Log.Info("Karaoke indicator not available; skipping initialization.");
+		}
 	}
 
 	public void StopSession()
