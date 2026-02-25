@@ -147,8 +147,8 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		if (_karaoke?.IsAvailable == true)
 		{
-			_karaoke.UpdateDisplay(cue, beat, _overlay);
 			SetDisplayText(cue.Text, cue.Style);
+			_karaoke.UpdateDisplay(cue, beat, _overlay);
 			return;
 		}
 
