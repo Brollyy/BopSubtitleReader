@@ -152,6 +152,7 @@ namespace TMPro
 		public TextWrappingModes textWrappingMode { get; set; }
 		public bool richText { get; set; }
 		public TMP_TextInfo textInfo { get; } = new TMP_TextInfo();
+		public void ForceMeshUpdate() { }
 	}
 
 	public enum TextWrappingModes

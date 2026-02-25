@@ -228,8 +228,9 @@ public sealed class KaraokeIndicatorAdapter
 			var rect = new Rect(0f, 0f, texture.width, texture.height);
 			return Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f);
 		}
-		catch (Exception)
+		catch (Exception ex)
 		{
+			Log.Warn($"Failed to load bundled karaoke sprite: {ex}");
 			return null;
 		}
 	}

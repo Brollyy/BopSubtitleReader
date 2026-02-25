@@ -26,6 +26,9 @@ return;
 
 ApplyStyle(style);
 _tmpText.text = text;
+// Force TMP to rebuild the mesh immediately so textInfo.characterInfo reflects the
+// current text and layout before GetSegmentViewportPosition queries it this frame.
+_tmpText.ForceMeshUpdate();
 if (!_host.activeSelf)
 {
 _host.SetActive(true);
