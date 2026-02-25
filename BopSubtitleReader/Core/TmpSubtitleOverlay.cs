@@ -147,7 +147,7 @@ public sealed class TmpSubtitleOverlay
 
 		var canvas = canvasObject.AddComponent<Canvas>();
 		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-		canvas.sortingOrder = 32000;
+		canvas.sortingOrder = 100;
 
 		var textObject = new GameObject("BOP_SubtitleText");
 		textObject.transform.SetParent(canvasObject.transform, false);
@@ -287,6 +287,16 @@ public sealed class TmpSubtitleOverlay
 		if (_tmpText is null)
 		{
 			return;
+		}
+
+		// Rebuild the catalog lazily if it was empty at init time (fonts may not be loaded yet).
+		if (_fontAssets.Count == 0)
+		{
+			BuildFontCatalog();
+			if (_fontAssets.Count > 0)
+			{
+				AssignDefaultFontAsset();
+			}
 		}
 
 		TMP_FontAsset? selected = null;

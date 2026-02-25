@@ -52,7 +52,14 @@ public sealed class KaraokeIndicatorAdapter
 
 		var activeSegment = cue.KaraokeSegments[activeSegmentIndex];
 		var activeMarkerBeat = activeSegment.Beat ?? cue.StartBeat;
-		var phase = Mathf.Clamp01(beat - activeMarkerBeat);
+
+		// Phase speed scales with segment duration so the indicator bounces once per segment
+		// regardless of tempo — slower segments get a slower bounce.
+		var nextMarkerBeat = activeSegmentIndex + 1 < cue.KaraokeSegments.Count
+			? cue.KaraokeSegments[activeSegmentIndex + 1].Beat ?? cue.EndBeat
+			: cue.EndBeat;
+		var segmentDurationBeats = Mathf.Max(nextMarkerBeat - activeMarkerBeat, 0.001f);
+		var phase = Mathf.Clamp01((beat - activeMarkerBeat) / segmentDurationBeats);
 		var pulse = Mathf.Abs(Mathf.Sin(phase * Mathf.PI * 2f));
 
 		var targetViewportX = 0.5f;
@@ -70,10 +77,15 @@ public sealed class KaraokeIndicatorAdapter
 		}
 
 		// Lerp toward the target viewport position for smooth transitions.
+		// If the target Y changed by more than half a character height, the indicator is moving
+		// to a different line — snap directly to avoid a distracting cross-line sweep.
 		var target = new Vector2(targetViewportX, targetViewportY);
-		_currentViewportPos = _hasPosition
-			? Vector2.Lerp(_currentViewportPos, target, Mathf.Min(Time.deltaTime * 15f, 1f))
-			: target;
+		var isLineChange = _hasPosition
+			&& charHeightFraction > 0f
+			&& Mathf.Abs(targetViewportY - _currentViewportPos.y) > charHeightFraction * 0.5f;
+		_currentViewportPos = (!_hasPosition || isLineChange)
+			? target
+			: Vector2.Lerp(_currentViewportPos, target, Mathf.Min(Time.deltaTime * 15f, 1f));
 		_hasPosition = true;
 
 		var worldPosition = camera.ViewportToWorldPoint(new Vector3(_currentViewportPos.x, _currentViewportPos.y, 4f));
