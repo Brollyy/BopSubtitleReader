@@ -147,7 +147,7 @@ public sealed class TmpSubtitleOverlay
 
 		_tmpText = textObject.AddComponent<TextMeshProUGUI>();
 		_tmpText.fontSize = 40f;
-		_tmpText.enableWordWrapping = true;
+		_tmpText.textWrappingMode = TextWrappingModes.Normal;
 		_tmpText.richText = true;
 		_tmpText.alignment = TextAlignmentOptions.Bottom;
 
