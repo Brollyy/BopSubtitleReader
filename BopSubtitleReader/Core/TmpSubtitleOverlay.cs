@@ -249,16 +249,36 @@ public sealed class TmpSubtitleOverlay
 		_fontAssetByKey.Clear();
 		_fontAssets.Clear();
 
-		var loadedAssets = Resources.FindObjectsOfTypeAll<TMP_FontAsset>();
-		foreach (var asset in loadedAssets)
+		// Primary: fonts referenced by active TMP components in the scene are always in memory.
+		var tmpComponents = Object.FindObjectsOfType<TextMeshProUGUI>(true);
+		foreach (var component in tmpComponents)
+		{
+			if (component.font is not null)
+			{
+				IndexFontAsset(component.font);
+			}
+		}
+
+		// Secondary: any TMP_FontAsset objects that happen to be registered in Resources.
+		var resourceFonts = Resources.FindObjectsOfTypeAll<TMP_FontAsset>();
+		foreach (var asset in resourceFonts)
+		{
+			IndexFontAsset(asset);
+		}
+	}
+
+	private void IndexFontAsset(TMP_FontAsset asset)
+	{
+		if (!_fontAssets.Contains(asset))
 		{
 			_fontAssets.Add(asset);
-			RegisterFontAssetKey(asset.name, asset);
-			var sourceFontName = asset.sourceFontFile?.name;
-			if (!string.IsNullOrWhiteSpace(sourceFontName))
-			{
-				RegisterFontAssetKey(sourceFontName!, asset);
-			}
+		}
+
+		RegisterFontAssetKey(asset.name, asset);
+		var sourceFontName = asset.sourceFontFile?.name;
+		if (!string.IsNullOrWhiteSpace(sourceFontName))
+		{
+			RegisterFontAssetKey(sourceFontName!, asset);
 		}
 	}
 
