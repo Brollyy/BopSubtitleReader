@@ -113,6 +113,17 @@ public sealed class KaraokeIndicatorAdapter
 		_indicatorObject.transform.localScale = Vector3.one * (scale + pulse * scale * 0.2f);
 	}
 
+	/// <summary>
+	/// Finds the character start index of the segment at <paramref name="activeSegmentIndex"/>
+	/// within <see cref="SubtitleCue.Text"/>.
+	/// <para>
+	/// Assumes that segments appear in the same left-to-right order as they do in
+	/// <see cref="SubtitleCue.Text"/> (i.e. segment[i].Text is always found after the end of
+	/// segment[i-1].Text). Both parsers (ASS and JSON) produce segments in text order, so this
+	/// assumption holds in practice. If a segment's text cannot be found starting from the
+	/// expected position, the method returns -1 and the indicator falls back to center.
+	/// </para>
+	/// </summary>
 	private static int FindSegmentCharStart(SubtitleCue cue, int activeSegmentIndex)
 	{
 		var searchFrom = 0;
