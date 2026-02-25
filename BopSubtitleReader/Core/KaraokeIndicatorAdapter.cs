@@ -14,6 +14,8 @@ public sealed class KaraokeIndicatorAdapter
 	private SpriteRenderer? _renderer;
 	private Sprite? _bopSprite;
 	private bool _initialized;
+	private Vector2 _currentViewportPos = new(0.5f, 0.14f);
+	private bool _hasPosition;
 
 	public bool IsAvailable { get; private set; }
 
@@ -53,26 +55,50 @@ public sealed class KaraokeIndicatorAdapter
 		var phase = Mathf.Clamp01(beat - activeMarkerBeat);
 		var pulse = Mathf.Abs(Mathf.Sin(phase * Mathf.PI * 2f));
 
-		var viewportX = 0.5f;
-		var viewportY = 0.14f;
+		var targetViewportX = 0.5f;
+		var targetViewportY = 0.14f;
+		var charHeightFraction = 0f;
 		var charStart = FindSegmentCharStart(cue, activeSegmentIndex);
-		var segCenter = charStart >= 0
-			? overlay?.GetSegmentViewportCenter(charStart, activeSegment.Text.Length)
+		var segPos = charStart >= 0
+			? overlay?.GetSegmentViewportPosition(charStart, activeSegment.Text.Length)
 			: null;
-		if (segCenter.HasValue)
+		if (segPos.HasValue)
 		{
-			viewportX = segCenter.Value.x;
-			viewportY = segCenter.Value.y;
+			targetViewportX = segPos.Value.x;
+			targetViewportY = segPos.Value.y;
+			charHeightFraction = segPos.Value.z;
 		}
 
-		var worldPosition = camera.ViewportToWorldPoint(new Vector3(viewportX, viewportY, 4f));
+		// Lerp toward the target viewport position for smooth transitions.
+		var target = new Vector2(targetViewportX, targetViewportY);
+		_currentViewportPos = _hasPosition
+			? Vector2.Lerp(_currentViewportPos, target, Mathf.Min(Time.deltaTime * 15f, 1f))
+			: target;
+		_hasPosition = true;
+
+		var worldPosition = camera.ViewportToWorldPoint(new Vector3(_currentViewportPos.x, _currentViewportPos.y, 4f));
 		if (camera.orthographic)
 		{
 			worldPosition.z = 0f;
 		}
 
+		// Bounce the indicator above the text.
 		_indicatorObject.transform.position = worldPosition + new Vector3(0f, pulse * 0.15f, 0f);
-		_indicatorObject.transform.localScale = Vector3.one * (0.35f + pulse * 0.1f);
+
+		// Scale proportional to character height; fall back to fixed size when unknown.
+		float scale;
+		if (charHeightFraction > 0f)
+		{
+			var worldAtTop = camera.ViewportToWorldPoint(new Vector3(_currentViewportPos.x, _currentViewportPos.y + charHeightFraction, 4f));
+			var charHeightWorld = Mathf.Abs(worldAtTop.y - worldPosition.y);
+			scale = charHeightWorld * 0.6f;
+		}
+		else
+		{
+			scale = 0.35f;
+		}
+
+		_indicatorObject.transform.localScale = Vector3.one * (scale + pulse * scale * 0.2f);
 	}
 
 	private static int FindSegmentCharStart(SubtitleCue cue, int activeSegmentIndex)
@@ -115,6 +141,7 @@ public sealed class KaraokeIndicatorAdapter
 		if (_indicatorObject is null || !_indicatorObject.activeSelf) return;
 		Log.Trace("Karaoke indicator is hidden.");
 		_indicatorObject.SetActive(false);
+		_hasPosition = false;
 	}
 
 	public bool EnsureInitialized()

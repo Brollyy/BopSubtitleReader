@@ -44,10 +44,11 @@ public sealed class TmpSubtitleOverlay
 	}
 
 	/// <summary>
-	/// Returns the viewport-space center X and bottom Y of the character range [charStart, charStart+charLength)
-	/// within the currently rendered text, or null if the information is unavailable.
+	/// Returns the viewport-space center X (x), top Y (y), and character height fraction (z)
+	/// of the character range [charStart, charStart+charLength) within the currently rendered text,
+	/// or null if the information is unavailable.
 	/// </summary>
-	public Vector2? GetSegmentViewportCenter(int charStart, int charLength)
+	public Vector3? GetSegmentViewportPosition(int charStart, int charLength)
 	{
 		if (!_available || _tmpText is null)
 		{
@@ -73,7 +74,8 @@ public sealed class TmpSubtitleOverlay
 		}
 
 		var sumX = 0f;
-		var minY = float.MaxValue;
+		var maxScreenY = float.MinValue;
+		var minScreenY = float.MaxValue;
 		var visibleCount = 0;
 		var charEnd = charStart + charLength;
 
@@ -91,15 +93,24 @@ public sealed class TmpSubtitleOverlay
 			}
 
 			var localCenterX = (charInfo.bottomLeft.x + charInfo.topRight.x) * 0.5f;
+			var localTopY = charInfo.topRight.y;
 			var localBottomY = charInfo.bottomLeft.y;
 
-			var worldPos = _tmpText.transform.TransformPoint(new Vector3(localCenterX, localBottomY, 0f));
-			var screenPos = RectTransformUtility.WorldToScreenPoint(null, worldPos);
+			var worldTopPos = _tmpText.transform.TransformPoint(new Vector3(localCenterX, localTopY, 0f));
+			var worldBottomPos = _tmpText.transform.TransformPoint(new Vector3(localCenterX, localBottomY, 0f));
 
-			sumX += screenPos.x;
-			if (screenPos.y < minY)
+			var screenTopPos = RectTransformUtility.WorldToScreenPoint(null, worldTopPos);
+			var screenBottomPos = RectTransformUtility.WorldToScreenPoint(null, worldBottomPos);
+
+			sumX += screenTopPos.x;
+			if (screenTopPos.y > maxScreenY)
 			{
-				minY = screenPos.y;
+				maxScreenY = screenTopPos.y;
+			}
+
+			if (screenBottomPos.y < minScreenY)
+			{
+				minScreenY = screenBottomPos.y;
 			}
 
 			visibleCount++;
@@ -110,9 +121,11 @@ public sealed class TmpSubtitleOverlay
 			return null;
 		}
 
-		return new Vector2(
-			(sumX / visibleCount) / Screen.width,
-			minY / Screen.height);
+		var viewportX = (sumX / visibleCount) / Screen.width;
+		var viewportTopY = maxScreenY / Screen.height;
+		var charHeightFraction = (maxScreenY - minScreenY) / Screen.height;
+
+		return new Vector3(viewportX, viewportTopY, charHeightFraction);
 	}
 
 	private bool EnsureInitialized()

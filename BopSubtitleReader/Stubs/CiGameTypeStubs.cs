@@ -149,8 +149,17 @@ namespace TMPro
 		public FontStyles fontStyle { get; set; }
 		public TextAlignmentOptions alignment { get; set; }
 		public bool enableWordWrapping { get; set; }
+		public TextWrappingModes textWrappingMode { get; set; }
 		public bool richText { get; set; }
 		public TMP_TextInfo textInfo { get; } = new TMP_TextInfo();
+	}
+
+	public enum TextWrappingModes
+	{
+		Normal = 0,
+		NoWrap = 1,
+		PreserveWhitespace = 2,
+		PreserveWhitespaceNoWrap = 3,
 	}
 
 #pragma warning restore CA1051
