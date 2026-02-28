@@ -22,6 +22,8 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private const string KaraokeActiveSentinel = "__KARAOKE_ACTIVE__";
 
 	private readonly TmpSubtitleOverlay _overlay = new();
+	private readonly List<KaraokeRenderSegment> _karaokeSegmentsBuffer = [];
+	private readonly Stack<KaraokeRenderSegment> _karaokeSegmentPool = [];
 
 	private SubtitleTrack? _track;
 	private SubtitleCue? _activeCue;
@@ -35,6 +37,10 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	// segment changes or a progressive-fill (Kf) segment is in progress.
 	private SubtitleCue? _cachedKaraokeCue;
 	private int _cachedActiveSegmentIndex = -1;
+	private float _cachedKaraokeBeat = float.NaN;
+	private Camera? _cachedSubtitleCamera;
+	private float _nextCameraResolveTime;
+	private const float CameraResolveIntervalSeconds = 0.5f;
 	public bool HasActiveSession => _track is not null && _loader is not null && _config is not null;
 
 	public static SubtitleRuntimeController Instance
@@ -63,7 +69,10 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_timingResolved = false;
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
-		_overlay.SetCamera(ResolveSubtitleCamera(loader));
+		_cachedKaraokeBeat = float.NaN;
+		_cachedSubtitleCamera = null;
+		_nextCameraResolveTime = 0f;
+		RefreshSubtitleCamera(force: true);
 		_overlay.Hide();
 		var karaokeCueCount = track.Cues.Count(c => c.KaraokeSegments.Count > 0);
 		Log.Info($"Subtitle session started with {track.Cues.Count} cue(s), {karaokeCueCount} karaoke cue(s).");
@@ -79,6 +88,9 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_timingResolved = false;
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
+		_cachedKaraokeBeat = float.NaN;
+		_cachedSubtitleCamera = null;
+		_nextCameraResolveTime = 0f;
 		_overlay.Hide();
 	}
 
@@ -104,7 +116,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			return;
 		}
 
-		_overlay.SetCamera(ResolveSubtitleCamera(_loader));
+		RefreshSubtitleCamera();
 
 		if (!_timingResolved)
 		{
@@ -113,7 +125,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		}
 
 		var beat = jukebox.CurrentBeat;
-		var cue = _track.Cues.FirstOrDefault(cue => cue.IsActive(beat));
+		var cue = FindActiveCue(_track.Cues, beat);
 		if (cue == _activeCue)
 		{
 			if (cue is not null)
@@ -142,14 +154,66 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			return;
 		}
 
+		var displayStyle = ResolveDisplayStyle(cue.Style);
 		var hasKaraoke = cue.KaraokeSegments.Count > 0;
 		if (!hasKaraoke || !_config.KaraokeEnabled.Value)
 		{
-			SetDisplayText(cue.Text, cue.Style);
+			SetDisplayText(cue.Text, displayStyle);
 			return;
 		}
 
-		SetKaraokeDisplay(cue, beat);
+		SetKaraokeDisplay(cue, beat, displayStyle);
+	}
+
+	private SubtitleCueStyle ResolveDisplayStyle(SubtitleCueStyle? cueStyle)
+	{
+		var configuredStyle = BuildConfiguredDisplayStyle();
+		if (_config is null || !_config.UseAssStyles.Value || cueStyle is null)
+		{
+			return configuredStyle;
+		}
+
+		return MergeStyles(configuredStyle, cueStyle);
+	}
+
+	private SubtitleCueStyle BuildConfiguredDisplayStyle()
+	{
+		if (_config is null)
+		{
+			return new SubtitleCueStyle();
+		}
+
+		var fontName = string.IsNullOrWhiteSpace(_config.DisplayFontName.Value)
+			? null
+			: _config.DisplayFontName.Value;
+		return new SubtitleCueStyle
+		{
+			FontName = fontName,
+			FontSize = _config.DisplayFontSize.Value,
+			ColorHexRgba = EnsureRgba(_config.DisplayColorHexRgba.Value, "#FFFFFFFF"),
+			SecondaryColorHexRgba = EnsureRgba(_config.DisplaySecondaryColorHexRgba.Value, "#FFFF00FF"),
+			OutlineColorHexRgba = EnsureRgba(_config.DisplayOutlineColorHexRgba.Value, "#000000FF"),
+			OutlineWidth = Mathf.Max(0f, _config.DisplayOutlineWidth.Value),
+			Bold = _config.DisplayBold.Value,
+			Italic = _config.DisplayItalic.Value,
+			Alignment = Mathf.Clamp(_config.DisplayAlignment.Value, 1, 9)
+		};
+	}
+
+	private static SubtitleCueStyle MergeStyles(SubtitleCueStyle configuredStyle, SubtitleCueStyle cueStyle)
+	{
+		return new SubtitleCueStyle
+		{
+			FontName = cueStyle.FontName ?? configuredStyle.FontName,
+			FontSize = cueStyle.FontSize ?? configuredStyle.FontSize,
+			ColorHexRgba = cueStyle.ColorHexRgba ?? configuredStyle.ColorHexRgba,
+			SecondaryColorHexRgba = cueStyle.SecondaryColorHexRgba ?? configuredStyle.SecondaryColorHexRgba,
+			OutlineColorHexRgba = cueStyle.OutlineColorHexRgba ?? configuredStyle.OutlineColorHexRgba,
+			OutlineWidth = cueStyle.OutlineWidth ?? configuredStyle.OutlineWidth,
+			Bold = cueStyle.Bold ?? configuredStyle.Bold,
+			Italic = cueStyle.Italic ?? configuredStyle.Italic,
+			Alignment = cueStyle.Alignment ?? configuredStyle.Alignment
+		};
 	}
 
 	private void SetDisplayText(string value, SubtitleCueStyle? style)
@@ -208,6 +272,59 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		track.Cues.Sort((a, b) => a.StartBeat.CompareTo(b.StartBeat));
 	}
 
+	private void RefreshSubtitleCamera(bool force = false)
+	{
+		if (_loader is null || !_loader)
+		{
+			return;
+		}
+
+		var shouldResolve = force
+			|| Time.unscaledTime >= _nextCameraResolveTime
+			|| _cachedSubtitleCamera is null
+			|| !_cachedSubtitleCamera
+			|| !_cachedSubtitleCamera.enabled;
+		if (!shouldResolve)
+		{
+			return;
+		}
+
+		var resolvedCamera = ResolveSubtitleCamera(_loader);
+		if (force || !ReferenceEquals(_cachedSubtitleCamera, resolvedCamera))
+		{
+			_cachedSubtitleCamera = resolvedCamera;
+			_overlay.SetCamera(resolvedCamera);
+		}
+
+		_nextCameraResolveTime = Time.unscaledTime + CameraResolveIntervalSeconds;
+	}
+
+	private static SubtitleCue? FindActiveCue(List<SubtitleCue> cues, float beat)
+	{
+		var low = 0;
+		var high = cues.Count - 1;
+		while (low <= high)
+		{
+			var mid = low + ((high - low) >> 1);
+			var cue = cues[mid];
+			if (beat < cue.StartBeat)
+			{
+				high = mid - 1;
+				continue;
+			}
+
+			if (beat >= cue.EndBeat)
+			{
+				low = mid + 1;
+				continue;
+			}
+
+			return cue;
+		}
+
+		return null;
+	}
+
 	public static Camera? ResolveSubtitleCamera(MixtapeLoaderCustom? loader = null)
 	{
 		if (loader is not null)
@@ -237,11 +354,14 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		return Camera.main;
 	}
 
-	private void SetKaraokeDisplay(SubtitleCue cue, float beat)
+	private void SetKaraokeDisplay(SubtitleCue cue, float beat, SubtitleCueStyle style)
 	{
 		var activeIndex = FindActiveKaraokeSegmentIndex(cue, beat);
 		var cueChanged = !ReferenceEquals(_cachedKaraokeCue, cue);
 		var segmentChanged = activeIndex != _cachedActiveSegmentIndex;
+		var beatChanged = float.IsNaN(_cachedKaraokeBeat) || !Mathf.Approximately(_cachedKaraokeBeat, beat);
+		var styleKey = $"{BuildStyleKey(style)}|karaoke";
+		var styleChanged = !string.Equals(_displayStyleKey, styleKey, StringComparison.Ordinal);
 
 		// The active segment's fill progress changes every frame only for Kf (progressive-fill) tags.
 		var isActiveFill = activeIndex >= 0
@@ -251,7 +371,9 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		// Skip the (expensive) rebuild when nothing has changed.
 		// Also rebuild when karaoke display wasn't already active (e.g. KaraokeEnabled toggled on).
-		if (!cueChanged && !segmentChanged && !isActiveFill
+		if (!cueChanged && !segmentChanged
+			&& (!isActiveFill || !beatChanged)
+			&& !styleChanged
 			&& string.Equals(_displayText, KaraokeActiveSentinel, StringComparison.Ordinal))
 		{
 			return;
@@ -260,10 +382,11 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_cachedKaraokeCue = cue;
 		_cachedActiveSegmentIndex = activeIndex;
 
-		var segments = BuildKaraokeRenderSegments(cue, beat);
-		_overlay.SetKaraokeText(cue.Text, cue.Style, segments);
+		var segments = BuildKaraokeRenderSegments(cue, beat, style);
+		_overlay.SetKaraokeText(cue.Text, style, segments);
 		_displayText = KaraokeActiveSentinel;
-		_displayStyleKey = $"{BuildStyleKey(cue.Style)}|karaoke";
+		_displayStyleKey = styleKey;
+		_cachedKaraokeBeat = beat;
 	}
 
 	private static int FindActiveKaraokeSegmentIndex(SubtitleCue cue, float beat)
@@ -280,23 +403,27 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		return activeIndex;
 	}
 
-	private static List<KaraokeRenderSegment> BuildKaraokeRenderSegments(SubtitleCue cue, float beat)
+	private List<KaraokeRenderSegment> BuildKaraokeRenderSegments(SubtitleCue cue, float beat, SubtitleCueStyle style)
 	{
-		var result = new List<KaraokeRenderSegment>(cue.KaraokeSegments.Count + 2);
+		RecycleKaraokeRenderSegments();
+		var result = _karaokeSegmentsBuffer;
 		if (cue.KaraokeSegments.Count == 0)
 		{
-			result.Add(new KaraokeRenderSegment
-			{
-				StartCharIndex = 0,
-				CharLength = cue.Text.Length,
-				Text = cue.Text
-			});
+			AddRenderSegment(
+				result,
+				0,
+				cue.Text.Length,
+				cue.Text,
+				"#FFFFFFFF",
+				"#FFFFFFFF",
+				"#000000FF",
+				1f);
 			return result;
 		}
 
-		var primaryColor = EnsureRgba(cue.Style?.ColorHexRgba, "#FFFFFFFF");
-		var secondaryColor = EnsureRgba(cue.Style?.SecondaryColorHexRgba, "#FFFF00FF");
-		var outlineColor = EnsureRgba(cue.Style?.OutlineColorHexRgba, "#000000FF");
+		var primaryColor = EnsureRgba(style.ColorHexRgba, "#FFFFFFFF");
+		var secondaryColor = EnsureRgba(style.SecondaryColorHexRgba, "#FFFF00FF");
+		var outlineColor = EnsureRgba(style.OutlineColorHexRgba, "#000000FF");
 		var hiddenOutlineColor = WithAlpha(outlineColor, 0f);
 		var textCursor = 0;
 		for (var i = 0; i < cue.KaraokeSegments.Count; i++)
@@ -314,16 +441,16 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 			if (startIndex > textCursor)
 			{
-				result.Add(new KaraokeRenderSegment
-				{
-					StartCharIndex = textCursor,
-					CharLength = startIndex - textCursor,
-					Text = cue.Text.Substring(textCursor, startIndex - textCursor),
-					BaseFaceColorHexRgba = primaryColor,
-					FillFaceColorHexRgba = primaryColor,
-					OutlineColorHexRgba = outlineColor,
-					FillProgress = 1f
-				});
+				var gapLength = startIndex - textCursor;
+				AddRenderSegment(
+					result,
+					textCursor,
+					gapLength,
+					cue.Text.Substring(textCursor, gapLength),
+					primaryColor,
+					primaryColor,
+					outlineColor,
+					1f);
 			}
 
 			var startBeat = segment.Beat ?? cue.StartBeat;
@@ -351,22 +478,21 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		if (textCursor < cue.Text.Length)
 		{
-			result.Add(new KaraokeRenderSegment
-			{
-				StartCharIndex = textCursor,
-				CharLength = cue.Text.Length - textCursor,
-				Text = cue.Text.Substring(textCursor),
-				BaseFaceColorHexRgba = primaryColor,
-				FillFaceColorHexRgba = primaryColor,
-				OutlineColorHexRgba = outlineColor,
-				FillProgress = 1f
-			});
+			AddRenderSegment(
+				result,
+				textCursor,
+				cue.Text.Length - textCursor,
+				cue.Text.Substring(textCursor),
+				primaryColor,
+				primaryColor,
+				outlineColor,
+				1f);
 		}
 
 		return result;
 	}
 
-	private static void AddRenderedSegment(
+	private void AddRenderedSegment(
 		List<KaraokeRenderSegment> target,
 		int startCharIndex,
 		string text,
@@ -388,59 +514,59 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		if (beat < startBeat)
 		{
 			var preOutline = tagType == KaraokeTagType.Ko ? hiddenOutlineColor : outlineColor;
-			target.Add(new KaraokeRenderSegment
-			{
-				StartCharIndex = startCharIndex,
-				CharLength = text.Length,
-				Text = text,
-				BaseFaceColorHexRgba = secondaryColor,
-				FillFaceColorHexRgba = secondaryColor,
-				OutlineColorHexRgba = preOutline,
-				FillProgress = 1f
-			});
+			AddRenderSegment(target, startCharIndex, text.Length, text, secondaryColor, secondaryColor, preOutline, 1f);
 			return;
 		}
 
 		if (beat >= endBeat)
 		{
-			target.Add(new KaraokeRenderSegment
-			{
-				StartCharIndex = startCharIndex,
-				CharLength = text.Length,
-				Text = text,
-				BaseFaceColorHexRgba = primaryColor,
-				FillFaceColorHexRgba = primaryColor,
-				OutlineColorHexRgba = outlineColor,
-				FillProgress = 1f
-			});
+			AddRenderSegment(target, startCharIndex, text.Length, text, primaryColor, primaryColor, outlineColor, 1f);
 			return;
 		}
 
 		if (tagType == KaraokeTagType.Kf)
 		{
-			target.Add(new KaraokeRenderSegment
-			{
-				StartCharIndex = startCharIndex,
-				CharLength = text.Length,
-				Text = text,
-				BaseFaceColorHexRgba = secondaryColor,
-				FillFaceColorHexRgba = primaryColor,
-				OutlineColorHexRgba = outlineColor,
-				FillProgress = Mathf.Clamp01(phase)
-			});
+			AddRenderSegment(target, startCharIndex, text.Length, text, secondaryColor, primaryColor, outlineColor, Mathf.Clamp01(phase));
 			return;
 		}
 
-		target.Add(new KaraokeRenderSegment
+		AddRenderSegment(target, startCharIndex, text.Length, text, primaryColor, primaryColor, outlineColor, 1f);
+	}
+
+	private void RecycleKaraokeRenderSegments()
+	{
+		for (var i = 0; i < _karaokeSegmentsBuffer.Count; i++)
 		{
-			StartCharIndex = startCharIndex,
-			CharLength = text.Length,
-			Text = text,
-			BaseFaceColorHexRgba = primaryColor,
-			FillFaceColorHexRgba = primaryColor,
-			OutlineColorHexRgba = outlineColor,
-			FillProgress = 1f
-		});
+			_karaokeSegmentPool.Push(_karaokeSegmentsBuffer[i]);
+		}
+
+		_karaokeSegmentsBuffer.Clear();
+	}
+
+	private void AddRenderSegment(
+		List<KaraokeRenderSegment> target,
+		int startCharIndex,
+		int charLength,
+		string text,
+		string baseFaceColorHexRgba,
+		string fillFaceColorHexRgba,
+		string outlineColorHexRgba,
+		float fillProgress)
+	{
+		if (charLength <= 0 || string.IsNullOrEmpty(text))
+		{
+			return;
+		}
+
+		var segment = _karaokeSegmentPool.Count > 0 ? _karaokeSegmentPool.Pop() : new KaraokeRenderSegment();
+		segment.StartCharIndex = startCharIndex;
+		segment.CharLength = charLength;
+		segment.Text = text;
+		segment.BaseFaceColorHexRgba = baseFaceColorHexRgba;
+		segment.FillFaceColorHexRgba = fillFaceColorHexRgba;
+		segment.OutlineColorHexRgba = outlineColorHexRgba;
+		segment.FillProgress = fillProgress;
+		target.Add(segment);
 	}
 
 	private static bool TryResolveSegmentRange(SubtitleCue cue, KaraokeSegment segment, int searchFrom, out int startIndex, out int length)

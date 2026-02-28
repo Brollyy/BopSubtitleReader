@@ -33,4 +33,66 @@ public sealed class SubtitleConfig(ConfigFile config)
 		"KaraokeEnabled",
 		true,
 		"Enable karaoke tag timing effects in subtitle text when segment data is available.");
+
+	public ConfigEntry<bool> UseAssStyles { get; } = config.Bind(
+		"Subtitles",
+		"UseAssStyles",
+		true,
+		"Apply ASS/SSA style defaults and inline overrides. Disable to force the configured display style below.");
+
+	public ConfigEntry<string> DisplayFontName { get; } = config.Bind(
+		"SubtitleDisplay",
+		"FontName",
+		"",
+		"Preferred subtitle font name. Empty uses built-in TMP defaults.");
+
+	public ConfigEntry<float> DisplayFontSize { get; } = config.Bind(
+		"SubtitleDisplay",
+		"FontSize",
+		40f,
+		"Default subtitle font size.");
+
+	public ConfigEntry<string> DisplayColorHexRgba { get; } = config.Bind(
+		"SubtitleDisplay",
+		"ColorHexRgba",
+		"#FFFFFFFF",
+		"Default subtitle text color in #RRGGBBAA format.");
+
+	public ConfigEntry<string> DisplaySecondaryColorHexRgba { get; } = config.Bind(
+		"SubtitleDisplay",
+		"SecondaryColorHexRgba",
+		"#FFFF00FF",
+		"Default karaoke pre-highlight color in #RRGGBBAA format.");
+
+	public ConfigEntry<string> DisplayOutlineColorHexRgba { get; } = config.Bind(
+		"SubtitleDisplay",
+		"OutlineColorHexRgba",
+		"#000000FF",
+		"Default subtitle outline color in #RRGGBBAA format.");
+
+	public ConfigEntry<float> DisplayOutlineWidth { get; } = config.Bind(
+		"SubtitleDisplay",
+		"OutlineWidth",
+		2f,
+		"Default subtitle outline width.");
+
+	public ConfigEntry<bool> DisplayBold { get; } = config.Bind(
+		"SubtitleDisplay",
+		"Bold",
+		false,
+		"Render subtitles in bold by default.");
+
+	public ConfigEntry<bool> DisplayItalic { get; } = config.Bind(
+		"SubtitleDisplay",
+		"Italic",
+		false,
+		"Render subtitles in italic by default.");
+
+	public ConfigEntry<int> DisplayAlignment { get; } = config.Bind(
+		"SubtitleDisplay",
+		"Alignment",
+		2,
+		new ConfigDescription(
+			"Default subtitle alignment using ASS numpad values (1-9).",
+			new AcceptableValueRange<int>(1, 9)));
 }

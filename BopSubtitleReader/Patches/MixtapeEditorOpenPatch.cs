@@ -6,8 +6,9 @@ namespace BopSubtitleReader.Patches;
 [HarmonyPatch(typeof(MixtapeEditorScript), "Open", [typeof(string)])]
 public static class MixtapeEditorOpenPatch
 {
-	public static void Prefix()
+	public static void Prefix(string path)
 	{
 		SubtitleCoordinator.Instance?.Clear();
+		SubtitleAssetPreserver.Instance.CaptureFromSource(path);
 	}
 }

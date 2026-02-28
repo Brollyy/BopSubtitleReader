@@ -28,30 +28,26 @@ Supported extensions:
 
 ## Subtitle file formats
 
-### 1. SRT (creator-friendly)
+### 1. SRT
 
-Use standard `.srt` files exported from common subtitle tools.
-
-SRT is time-based. At runtime, the mod converts subtitle seconds to chart beats using `JukeboxScript.SecondsToBeats(double)`, so tempo changes are respected automatically.
+Use standard `.srt` files exported from common subtitle tools. SRT is time-based.
 
 ### 2. ASS/SSA
 
-ASS/SSA `Dialogue` lines are supported and converted with the same runtime `SecondsToBeats` logic as SRT.
+ASS/SSA is supported, with V4 ScriptType, and 1920x1680 resolution.
 
-Supported karaoke tags:
-- `\k`
-- `\K`
-- `\kf`
-- `\ko`
+Supported karaoke tags: `\k`, `\K`, `\kf`, `\ko`.
 
 Supported style inputs:
 - style defaults from `[V4+ Styles]` / `[V4 Styles]`: `Fontname`, `Fontsize`, `PrimaryColour`, `Bold`, `Italic`, `Alignment`
-- per-line override tags: `\fn`, `\fs`, `\c` / `\1c`, `\b`, `\i`, `\an`
+- per-line override tags: `\fn`, `\fs`, `\c`, `\1c`, `\b`, `\i`, `\an`
 
-These tags are mapped onto the TMP overlay (font size, color, bold/italic, alignment). Unsupported ASS drawing/effect tags are ignored safely.
+These tags are mapped onto the [TMP overlay](https://docs.unity3d.com/Packages/com.unity.ugui@2.0/manual/TextMeshPro/index.html) (font size, color, bold/italic, alignment). Unsupported ASS drawing/effect tags are ignored.
 
 
-### 3. JSON (recommended for precise chart sync)
+### 3. JSON
+
+This is a custom subtitle format - it allows for timing subtitles to beats of the song (respects BPM changes).
 
 Single-track:
 
@@ -104,15 +100,37 @@ Language resolution order:
 
 ## Config
 
-`[Subtitles]`
+Config file location:
 
-- `Enabled=true`
-- `PreferredLanguage=`
-- `UseGameLanguage=true`
-- `FallbackToEnglish=true`
-- `FallbackToDefaultTrack=true`
-- `KaraokeEnabled=true`
-- `TimelineReferenceBpm=120`
+- `<GameRoot>/BepInEx/config/BopSubtitleReader.cfg`
+
+### `[Subtitles]`
+
+| Key | Type / Values | What it does |
+| --- | --- | --- |
+| `Enabled` | `true`/`false` | Master toggle for all subtitle rendering. |
+| `PreferredLanguage` | string | Force a language code like `en`, `ja`, `fr`. Leave empty to use automatic language resolution. |
+| `UseGameLanguage` | `true`/`false` | If `true`, attempts to use the game's current language. |
+| `FallbackToEnglish` | `true`/`false` | If selected language is missing, tries English (`en`). |
+| `FallbackToDefaultTrack` | `true`/`false` | If selected language and English are missing, uses subtitle catalog `defaultLanguage`. |
+| `KaraokeEnabled` | `true`/`false` | Enables karaoke timing effects when karaoke segment data exists. |
+| `UseAssStyles` | `true`/`false` | If `true`, ASS/SSA style defaults and inline style tags are applied. If `false`, ASS styles are ignored and display uses the values from `[SubtitleDisplay]`. |
+
+### `[SubtitleDisplay]`
+
+These are the base display settings used by the TMP subtitle overlay.
+
+| Key | Type / Values | What it does |
+| --- | --- | --- |
+| `FontName` | string | Preferred font name. Leave empty to use the mod's default TMP font selection. |
+| `FontSize` | float | Default subtitle text size. |
+| `ColorHexRgba` | color string | Default text color in `#RRGGBBAA`. |
+| `SecondaryColorHexRgba` | color string | Default secondary karaoke color in `#RRGGBBAA` (pre-highlight color for karaoke tags). |
+| `OutlineColorHexRgba` | color string | Default outline color in `#RRGGBBAA`. |
+| `OutlineWidth` | float | Default outline thickness. |
+| `Bold` | `true`/`false` | Render subtitles in bold by default. |
+| `Italic` | `true`/`false` | Render subtitles in italic by default. |
+| `Alignment` | `1..9` | ASS numpad alignment (`1` bottom-left, `2` bottom-center, `3` bottom-right, `4` mid-left, `5` center, `6` mid-right, `7` top-left, `8` top-center, `9` top-right). |
 
 ## Contributing
 
@@ -131,6 +149,7 @@ If `BepInExPluginsDir` exists, build output is copied there automatically.
 ### Pull requests
 
 Formatting, code style rules and analyzer rules are enforced on pull requests.
+To enable auto-format on commit locally, run the attached script once after cloning the repository.
 
 Windows:
 ```cmd

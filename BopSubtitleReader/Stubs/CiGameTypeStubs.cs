@@ -50,6 +50,10 @@ public sealed class MixtapeEditorScript
 	{
 	}
 
+	public void SaveAsRiq(string path)
+	{
+	}
+
 	public void ResetAllAndReformat()
 	{
 	}
@@ -77,6 +81,10 @@ public sealed class TitleScript
 public static class BopMixtapeSerializerV0
 {
 	public static void ReadDirectory(string path)
+	{
+	}
+
+	public static void WriteDirectory(string path)
 	{
 	}
 }

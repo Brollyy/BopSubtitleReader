@@ -25,6 +25,7 @@ public sealed class TmpSubtitleOverlay
 	private readonly HashSet<string> _failedFontLookups = new(StringComparer.OrdinalIgnoreCase);
 	private readonly HashSet<string> _missingRequestedFontsWarned = new(StringComparer.OrdinalIgnoreCase);
 	private readonly List<TMP_FontAsset> _configuredFallbackFonts = [];
+	private readonly Dictionary<TextMeshProUGUI, OutlineState> _outlineStateCache = [];
 	private OverlayStyleState _defaultStyle = OverlayStyleState.CreateDefault();
 
 	public void SetText(string text, SubtitleCueStyle? style)
@@ -489,8 +490,15 @@ public sealed class TmpSubtitleOverlay
 		ApplyOutline(_tmpText, new Color(0f, 0f, 0f, 0f), 0f);
 	}
 
-	private static void ApplyOutline(TextMeshProUGUI text, Color outlineColor, float outlineWidth)
+	private void ApplyOutline(TextMeshProUGUI text, Color outlineColor, float outlineWidth)
 	{
+		if (_outlineStateCache.TryGetValue(text, out var cached)
+			&& cached.Color == outlineColor
+			&& Mathf.Approximately(cached.Width, outlineWidth))
+		{
+			return;
+		}
+
 		var mat = text.fontMaterial;
 		if (mat is null)
 		{
@@ -501,6 +509,19 @@ public sealed class TmpSubtitleOverlay
 		mat.SetFloat("_OutlineWidth", outlineWidth);
 		mat.SetColor("_OutlineColor", outlineColor);
 		text.UpdateMeshPadding();
+
+		if (cached is null)
+		{
+			_outlineStateCache[text] = new OutlineState
+			{
+				Color = outlineColor,
+				Width = outlineWidth
+			};
+			return;
+		}
+
+		cached.Color = outlineColor;
+		cached.Width = outlineWidth;
 	}
 
 	private GameObject? EnsureKaraokeLayer()
@@ -690,6 +711,12 @@ public sealed class TmpSubtitleOverlay
 				Alignment = 2
 			};
 		}
+	}
+
+	private sealed class OutlineState
+	{
+		public Color Color { get; set; }
+		public float Width { get; set; }
 	}
 
 	private sealed class KaraokeSegmentView

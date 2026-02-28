@@ -13,7 +13,7 @@ public static class SubtitleFileLocator
 	private static readonly ClassLogger Log = ClassLogger.GetForClass(typeof(SubtitleFileLocator));
 
 	private static readonly Regex SubtitleFileRegex = new(
-		@"(?:^|/)(?:subtitles?|lyrics)(?:\.([a-zA-Z-]+))?\.(json|srt|ass|ssa)$",
+		@"^(?:subtitles?|lyrics)(?:\.([a-zA-Z-]+))?\.(json|srt|ass|ssa)$",
 		RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
 	public static bool TryLoadCatalog(
@@ -54,7 +54,7 @@ public static class SubtitleFileLocator
 	{
 		if (Directory.Exists(sourcePath))
 		{
-			foreach (var filePath in Directory.EnumerateFiles(sourcePath, "*.*", SearchOption.AllDirectories))
+			foreach (var filePath in Directory.EnumerateFiles(sourcePath, "*", SearchOption.TopDirectoryOnly))
 			{
 				var subtitleFile = TryReadDiskFile(filePath);
 				if (subtitleFile is not null)
@@ -98,7 +98,8 @@ public static class SubtitleFileLocator
 
 	private static SubtitleSourceAsset? TryReadDiskFile(string filePath)
 	{
-		var match = SubtitleFileRegex.Match(filePath.Replace('\\', '/'));
+		var fileName = Path.GetFileName(filePath);
+		var match = SubtitleFileRegex.Match(fileName);
 		if (!match.Success)
 		{
 			return null;
