@@ -125,6 +125,25 @@ namespace TMPro
 	{
 		public UnityEngine.Font? sourceFontFile { get; set; }
 		public System.Collections.Generic.List<TMP_FontAsset>? fallbackFontAssetTable { get; set; }
+
+		public static TMP_FontAsset? CreateFontAsset(UnityEngine.Font sourceFontFile)
+		{
+			if (sourceFontFile == null)
+			{
+				return null;
+			}
+
+			return new TMP_FontAsset
+			{
+				sourceFontFile = sourceFontFile
+			};
+		}
+	}
+
+	public static class TMP_Settings
+	{
+		public static object? instance { get; } = new object();
+		public static TMP_FontAsset? defaultFontAsset { get; set; }
 	}
 
 	public struct TMP_CharacterInfo
