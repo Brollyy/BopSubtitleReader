@@ -104,13 +104,6 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           cp BopSubtitleReader/bin/Release/net472/*.dll dist/
-          if ls BopSubtitleReader/bin/Release/net472/*.pdb >/dev/null 2>&1; then
-            cp BopSubtitleReader/bin/Release/net472/*.pdb dist/
-          fi
-          if [ -d BopSubtitleReader/bin/Release/net472/assets ]; then
-            mkdir -p dist/assets
-            cp -r BopSubtitleReader/bin/Release/net472/assets/. dist/assets/
-          fi
 
           echo "${{ needs.bump-version.outputs.version }}" > dist/VERSION.txt
 
