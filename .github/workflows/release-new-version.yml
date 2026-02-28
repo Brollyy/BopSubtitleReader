@@ -23,6 +23,8 @@ jobs:
       - name: Checkout master
         uses: actions/checkout@v4
         with:
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+          ssh-strict: false
           fetch-depth: 0
           ref: master
 
