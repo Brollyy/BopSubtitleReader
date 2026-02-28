@@ -35,11 +35,16 @@
     <UnityManagedDir Condition="'$(GameRoot)' != ''">$(GameRoot)/Bits &amp; Bops_Data/Managed</UnityManagedDir>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <ILRepackVersion>2.0.44.1</ILRepackVersion>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="all"/>
     <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all"/>
     <PackageReference Include="BepInEx.Core" Version="5.*"/>
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*"/>
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="$(ILRepackVersion)" PrivateAssets="all" ExcludeAssets="build"/>
     <PackageReference Include="System.Text.Json" Version="8.*"/>
     <PackageReference Include="UnityEngine.Modules" Version="2021.3.33" IncludeAssets="compile"/>
     <Reference Include="UnityEngine" Condition="'$(SkipGameReferences)' != 'true' and Exists('$(UnityManagedDir)/UnityEngine.dll')">
@@ -65,6 +70,8 @@
     <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
 
+  <UsingTask AssemblyFile="$(NuGetPackageRoot)ilrepack.lib.msbuild.task/$(ILRepackVersion)/build/ILRepack.Lib.MSBuild.Task.dll" TaskName="ILRepack"/>
+
   <Target Name="ValidateTemplateDependencies" BeforeTargets="ResolveReferences" Condition="'$(SkipGameReferences)' != 'true'">
     <ItemGroup>
       <MissingGameLibrary Include="@(GameLibrary)"
@@ -87,5 +94,21 @@
     <Copy SourceFiles="@(PluginRuntimePayload)"
           DestinationFiles="@(PluginRuntimePayload->'$(BepInExPluginsDir)/%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"/>
+  </Target>
+
+  <Target Name="MergeAssemblies" AfterTargets="Build" Condition="$(Configuration.Contains('Release'))">
+    <ItemGroup>
+      <RepackAssemblies Include="$(OutputPath)$(AssemblyName).dll"/>
+      <RepackAssemblies Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(AssemblyName).dll"/>
+      <ILRepackSearchPath Include="$(OutputPath)"/>
+      <ILRepackSearchPath Include="@(ReferencePathWithRefAssemblies->'%(RootDir)%(Directory)')"/>
+    </ItemGroup>
+    <ILRepack Parallel="true"
+              Internalize="true"
+              InputAssemblies="@(RepackAssemblies)"
+              TargetKind="Dll"
+              LibraryPath="@(ILRepackSearchPath)"
+              OutputFile="$(OutputPath)$(AssemblyName).dll"/>
+    <Delete Files="@(ReferenceCopyLocalPaths->'$(OutDir)%(DestinationSubDirectory)%(Filename)%(Extension)')"/>
   </Target>
 </Project>

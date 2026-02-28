@@ -105,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp BopSubtitleReader/bin/Release/net472/*.dll dist/
+          cp BopSubtitleReader/bin/Release/net472/BopSubtitleReader.dll dist/
 
           echo "${{ needs.bump-version.outputs.version }}" > dist/VERSION.txt
 
