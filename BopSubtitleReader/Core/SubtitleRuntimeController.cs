@@ -13,6 +13,10 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private static SubtitleRuntimeController? _instance;
 	private static readonly AccessTools.FieldRef<MixtapeLoaderCustom, JukeboxScript?> JukeboxRef =
 		AccessTools.FieldRefAccess<MixtapeLoaderCustom, JukeboxScript?>("jukebox");
+	private static readonly AccessTools.FieldRef<MixtapeLoaderCustom, SceneKey[]> SceneKeysRef =
+		AccessTools.FieldRefAccess<MixtapeLoaderCustom, SceneKey[]>("sceneKeys");
+	private static readonly AccessTools.FieldRef<MixtapeLoaderCustom, Dictionary<SceneKey, GameplayScript>> ScriptsRef =
+		AccessTools.FieldRefAccess<MixtapeLoaderCustom, Dictionary<SceneKey, GameplayScript>>("scripts");
 
 	// Sentinel stored in _displayText while the karaoke overlay is actively rendering.
 	private const string KaraokeActiveSentinel = "__KARAOKE_ACTIVE__";
@@ -59,6 +63,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_timingResolved = false;
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
+		_overlay.SetCamera(ResolveSubtitleCamera(loader));
 		_overlay.Hide();
 		var karaokeCueCount = track.Cues.Count(c => c.KaraokeSegments.Count > 0);
 		Log.Info($"Subtitle session started with {track.Cues.Count} cue(s), {karaokeCueCount} karaoke cue(s).");
@@ -98,6 +103,8 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			SetDisplayText(string.Empty, null);
 			return;
 		}
+
+		_overlay.SetCamera(ResolveSubtitleCamera(_loader));
 
 		if (!_timingResolved)
 		{
@@ -199,6 +206,35 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		}
 
 		track.Cues.Sort((a, b) => a.StartBeat.CompareTo(b.StartBeat));
+	}
+
+	public static Camera? ResolveSubtitleCamera(MixtapeLoaderCustom? loader = null)
+	{
+		if (loader is not null)
+		{
+			SceneKey[] sceneKeys = SceneKeysRef(loader);
+			Dictionary<SceneKey, GameplayScript> scripts = ScriptsRef(loader);
+			foreach (SceneKey sceneKey in sceneKeys)
+			{
+				if (!scripts.TryGetValue(sceneKey, out GameplayScript gameplayScript) || gameplayScript is null)
+				{
+					continue;
+				}
+
+				if (gameplayScript.cameraScript == null)
+				{
+					continue;
+				}
+
+				Camera? camera = gameplayScript.cameraScript.GetComponent<Camera>();
+				if (camera is not null && camera.enabled)
+				{
+					return camera;
+				}
+			}
+		}
+
+		return Camera.main;
 	}
 
 	private void SetKaraokeDisplay(SubtitleCue cue, float beat)

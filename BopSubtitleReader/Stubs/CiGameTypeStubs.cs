@@ -1,4 +1,5 @@
 #if SKIP_GAME_REFERENCES
+using System.Collections.Generic;
 using UnityEngine;
 
 // CI-only stubs for game-managed types that would normally come from Assembly-CSharp.
@@ -25,6 +26,12 @@ public sealed class MixtapeLoaderCustom : MonoBehaviour
 	public int total;
 	public JukeboxScript? jukebox;
 	public SceneKey[] sceneKeys = [SceneKey.MixtapeEditor];
+	public Dictionary<SceneKey, GameplayScript> scripts = [];
+}
+
+public sealed class GameplayScript : MonoBehaviour
+{
+	public MonoBehaviour? cameraScript;
 }
 
 public sealed class JukeboxScript : MonoBehaviour

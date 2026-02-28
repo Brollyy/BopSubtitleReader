@@ -15,6 +15,7 @@ public sealed class TmpSubtitleOverlay
 	private bool _initializationAttempted;
 	private bool _available;
 	private GameObject? _host;
+	private Canvas? _canvas;
 	private TextMeshProUGUI? _tmpText;
 	private RectTransform? _tmpRect;
 	private GameObject? _karaokeLayer;
@@ -119,6 +120,39 @@ public sealed class TmpSubtitleOverlay
 		}
 	}
 
+	public void SetCamera(Camera? camera)
+	{
+		if (!EnsureInitialized() || _canvas is null)
+		{
+			return;
+		}
+
+		if (camera is not null)
+		{
+			if (_canvas.renderMode != RenderMode.ScreenSpaceCamera)
+			{
+				_canvas.renderMode = RenderMode.ScreenSpaceCamera;
+			}
+
+			if (!ReferenceEquals(_canvas.worldCamera, camera))
+			{
+				_canvas.worldCamera = camera;
+			}
+
+			return;
+		}
+
+		if (_canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+		{
+			_canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+		}
+
+		if (_canvas.worldCamera is not null)
+		{
+			_canvas.worldCamera = null;
+		}
+	}
+
 	private bool EnsureInitialized()
 	{
 		if (_available)
@@ -139,6 +173,7 @@ public sealed class TmpSubtitleOverlay
 		var canvas = canvasObject.AddComponent<Canvas>();
 		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
 		canvas.sortingOrder = 100;
+		_canvas = canvas;
 
 		var textObject = new GameObject("BOP_SubtitleText");
 		textObject.transform.SetParent(canvasObject.transform, false);
