@@ -14,6 +14,9 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private static readonly AccessTools.FieldRef<MixtapeLoaderCustom, JukeboxScript?> JukeboxRef =
 		AccessTools.FieldRefAccess<MixtapeLoaderCustom, JukeboxScript?>("jukebox");
 
+	// Sentinel stored in _displayText while the karaoke overlay is actively rendering.
+	private const string KaraokeActiveSentinel = "__KARAOKE_ACTIVE__";
+
 	private readonly TmpSubtitleOverlay _overlay = new();
 
 	private SubtitleTrack? _track;
@@ -23,6 +26,11 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private bool _timingResolved;
 	private string _displayText = string.Empty;
 	private string _displayStyleKey = string.Empty;
+
+	// Karaoke display cache: only rebuild the rendered segment list when the active
+	// segment changes or a progressive-fill (Kf) segment is in progress.
+	private SubtitleCue? _cachedKaraokeCue;
+	private int _cachedActiveSegmentIndex = -1;
 	public bool HasActiveSession => _track is not null && _loader is not null && _config is not null;
 
 	public static SubtitleRuntimeController Instance
@@ -49,6 +57,8 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
+		_cachedKaraokeCue = null;
+		_cachedActiveSegmentIndex = -1;
 		_overlay.Hide();
 		var karaokeCueCount = track.Cues.Count(c => c.KaraokeSegments.Count > 0);
 		Log.Info($"Subtitle session started with {track.Cues.Count} cue(s), {karaokeCueCount} karaoke cue(s).");
@@ -62,6 +72,8 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
+		_cachedKaraokeCue = null;
+		_cachedActiveSegmentIndex = -1;
 		_overlay.Hide();
 	}
 
@@ -191,10 +203,45 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 	private void SetKaraokeDisplay(SubtitleCue cue, float beat)
 	{
+		var activeIndex = FindActiveKaraokeSegmentIndex(cue, beat);
+		var cueChanged = !ReferenceEquals(_cachedKaraokeCue, cue);
+		var segmentChanged = activeIndex != _cachedActiveSegmentIndex;
+
+		// The active segment's fill progress changes every frame only for Kf (progressive-fill) tags.
+		var isActiveFill = activeIndex >= 0
+			&& activeIndex < cue.KaraokeSegments.Count
+			&& cue.KaraokeSegments[activeIndex].TagType == KaraokeTagType.Kf
+			&& (cue.KaraokeSegments[activeIndex].Beat ?? cue.StartBeat) <= beat;
+
+		// Skip the (expensive) rebuild when nothing has changed.
+		// Also rebuild when karaoke display wasn't already active (e.g. KaraokeEnabled toggled on).
+		if (!cueChanged && !segmentChanged && !isActiveFill
+			&& string.Equals(_displayText, KaraokeActiveSentinel, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		_cachedKaraokeCue = cue;
+		_cachedActiveSegmentIndex = activeIndex;
+
 		var segments = BuildKaraokeRenderSegments(cue, beat);
 		_overlay.SetKaraokeText(cue.Text, cue.Style, segments);
-		_displayText = "__KARAOKE_ACTIVE__";
+		_displayText = KaraokeActiveSentinel;
 		_displayStyleKey = $"{BuildStyleKey(cue.Style)}|karaoke";
+	}
+
+	private static int FindActiveKaraokeSegmentIndex(SubtitleCue cue, float beat)
+	{
+		var activeIndex = -1;
+		for (var i = 0; i < cue.KaraokeSegments.Count; i++)
+		{
+			if ((cue.KaraokeSegments[i].Beat ?? cue.StartBeat) <= beat)
+			{
+				activeIndex = i;
+			}
+		}
+
+		return activeIndex;
 	}
 
 	private static List<KaraokeRenderSegment> BuildKaraokeRenderSegments(SubtitleCue cue, float beat)
@@ -371,6 +418,10 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			return startIndex >= 0 && length > 0 && startIndex + length <= cue.Text.Length;
 		}
 
+		// Assumes segments appear left-to-right in cue.Text (same order as the parser produces them).
+		// searchFrom ensures that repeated segment text (e.g. three "la" segments in "la la la")
+		// is matched at the correct occurrence. If the text is not found from searchFrom onward,
+		// the segment is skipped and the indicator falls back to center.
 		startIndex = cue.Text.IndexOf(segment.Text, searchFrom, StringComparison.Ordinal);
 		if (startIndex < 0)
 		{
