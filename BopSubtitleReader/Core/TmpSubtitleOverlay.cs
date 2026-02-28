@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -19,6 +20,10 @@ public sealed class TmpSubtitleOverlay
 	private GameObject? _karaokeLayer;
 	private readonly List<KaraokeSegmentView> _karaokeTextPool = [];
 	private TMP_FontAsset? _defaultFontAsset;
+	private readonly Dictionary<string, TMP_FontAsset> _runtimeFontCache = new(StringComparer.OrdinalIgnoreCase);
+	private readonly HashSet<string> _failedFontLookups = new(StringComparer.OrdinalIgnoreCase);
+	private readonly HashSet<string> _missingRequestedFontsWarned = new(StringComparer.OrdinalIgnoreCase);
+	private readonly List<TMP_FontAsset> _configuredFallbackFonts = [];
 	private OverlayStyleState _defaultStyle = OverlayStyleState.CreateDefault();
 
 	public void SetText(string text, SubtitleCueStyle? style)
@@ -229,14 +234,20 @@ public sealed class TmpSubtitleOverlay
 		rect.offsetMin = Vector2.zero;
 		rect.offsetMax = Vector2.zero;
 
+		AssignDefaultFontAsset();
+		ApplyTmpGlobalDefaultFont();
+
 		_tmpText = textObject.AddComponent<TextMeshProUGUI>();
+		if (_defaultFontAsset is not null)
+		{
+			_tmpText.font = _defaultFontAsset;
+		}
 		_tmpRect = rect;
 		_tmpText.fontSize = 40f;
 		_tmpText.textWrappingMode = TextWrappingModes.Normal;
 		_tmpText.richText = true;
 		_tmpText.alignment = TextAlignmentOptions.Bottom;
 
-		AssignDefaultFontAsset();
 		CaptureDefaultStyle();
 
 		_host = canvasObject;
@@ -334,21 +345,34 @@ public sealed class TmpSubtitleOverlay
 
 	private void AssignDefaultFontAsset()
 	{
-		if (_tmpText is null)
-		{
-			return;
-		}
-
-		string[] primaryCandidates = ["NotInter-Regular SDF", "Arial SDF", "Kardia Fat Runner SDF"];
+		string[] primaryCandidates = ["NotInter-Regular", "Arial", "Kardia Fat Runner"];
 		TMP_FontAsset? primary = null;
 		foreach (var name in primaryCandidates)
 		{
-			primary = LoadFontAsset(name);
+			primary = ResolveFontAsset(name, allowRuntimeFontCreate: true);
 			if (primary is not null)
 			{
-				Log.Info($"Primary subtitle font: {name}");
+				Log.Info($"Primary subtitle font: {primary.name} (requested: {name}).");
 				break;
 			}
+		}
+
+		string[] cjkFallbacks = ["MPLUSRounded1c-Regular SDF", "TaiwanPearl-Regular SDF", "Binggrae SDF"];
+		var fallbackList = new List<TMP_FontAsset>();
+		foreach (var name in cjkFallbacks)
+		{
+			var fallback = ResolveFontAsset(name, allowRuntimeFontCreate: true);
+			if (fallback is not null && !ReferenceEquals(fallback, primary))
+			{
+				fallbackList.Add(fallback);
+			}
+		}
+
+		if (primary is null && fallbackList.Count > 0)
+		{
+			primary = fallbackList[0];
+			fallbackList.RemoveAt(0);
+			Log.Warn($"No preferred primary subtitle font found. Promoting fallback '{primary.name}' as primary.");
 		}
 
 		if (primary is null)
@@ -357,24 +381,14 @@ public sealed class TmpSubtitleOverlay
 			return;
 		}
 
-		string[] cjkFallbacks = ["MPLUSRounded1c-Regular SDF", "TaiwanPearl-Regular SDF", "Binggrae SDF"];
-		var fallbackList = new List<TMP_FontAsset>();
-		foreach (var name in cjkFallbacks)
-		{
-			var fallback = LoadFontAsset(name);
-			if (fallback is not null && !ReferenceEquals(fallback, primary))
-			{
-				fallbackList.Add(fallback);
-			}
-		}
-
+		_configuredFallbackFonts.Clear();
+		_configuredFallbackFonts.AddRange(fallbackList);
 		if (fallbackList.Count > 0)
 		{
 			primary.fallbackFontAssetTable = fallbackList;
 			Log.Info($"Configured {fallbackList.Count} CJK fallback font(s) for subtitle overlay.");
 		}
 
-		_tmpText.font = primary;
 		_defaultFontAsset = primary;
 	}
 
@@ -383,16 +397,14 @@ public sealed class TmpSubtitleOverlay
 		TMP_FontAsset? selected = null;
 		if (!string.IsNullOrWhiteSpace(requestedFontName))
 		{
-			selected = LoadFontAsset(requestedFontName!);
-			if (selected is null)
-			{
-				// Also try with " SDF" suffix, which is the TMP convention for SDF fonts.
-				selected = LoadFontAsset($"{requestedFontName} SDF");
-			}
+			selected = ResolveFontAsset(requestedFontName!, allowRuntimeFontCreate: false);
 
 			if (selected is null)
 			{
-				Log.Warn($"Requested subtitle font '{requestedFontName}' was not found. Using fallback.");
+				if (_missingRequestedFontsWarned.Add(requestedFontName!))
+				{
+					Log.Warn($"Requested subtitle font '{requestedFontName}' was not found. Using fallback.");
+				}
 			}
 		}
 
@@ -402,7 +414,116 @@ public sealed class TmpSubtitleOverlay
 			return;
 		}
 
+		EnsureFallbackFonts(selected);
 		text.font = selected;
+	}
+
+	private TMP_FontAsset? ResolveFontAsset(string fontName, bool allowRuntimeFontCreate)
+	{
+		if (string.IsNullOrWhiteSpace(fontName))
+		{
+			return null;
+		}
+
+		if (_failedFontLookups.Contains(fontName))
+		{
+			return null;
+		}
+
+		if (_runtimeFontCache.TryGetValue(fontName, out var cached))
+		{
+			return cached;
+		}
+
+		var direct = LoadFontAsset(fontName);
+		if (direct is null && !fontName.EndsWith(" SDF", StringComparison.OrdinalIgnoreCase))
+		{
+			direct = LoadFontAsset($"{fontName} SDF");
+		}
+
+		if (direct is not null)
+		{
+			_runtimeFontCache[fontName] = direct;
+			return direct;
+		}
+
+		if (!allowRuntimeFontCreate)
+		{
+			_failedFontLookups.Add(fontName);
+			return null;
+		}
+
+		var sourceName = fontName.EndsWith(" SDF", StringComparison.OrdinalIgnoreCase)
+			? fontName.Substring(0, fontName.Length - 4)
+			: fontName;
+		var fonts = Resources.FindObjectsOfTypeAll<Font>();
+		var sourceFont = fonts.FirstOrDefault(f => string.Equals(f.name, sourceName, StringComparison.OrdinalIgnoreCase))
+			?? fonts.FirstOrDefault(f => string.Equals(f.name, fontName, StringComparison.OrdinalIgnoreCase));
+		if (sourceFont is null)
+		{
+			_failedFontLookups.Add(fontName);
+			return null;
+		}
+
+		try
+		{
+			var created = TMP_FontAsset.CreateFontAsset(sourceFont);
+			if (created is null)
+			{
+				return null;
+			}
+
+			_runtimeFontCache[fontName] = created;
+			_runtimeFontCache[sourceFont.name] = created;
+			Log.Info($"Created runtime TMP font asset from source font '{sourceFont.name}'.");
+			return created;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"Failed to create TMP font asset from '{sourceFont.name}': {ex.Message}");
+			_failedFontLookups.Add(fontName);
+			return null;
+		}
+	}
+
+	private void ApplyTmpGlobalDefaultFont()
+	{
+		if (_defaultFontAsset is null)
+		{
+			return;
+		}
+
+		if (TMP_Settings.instance is null)
+		{
+			return;
+		}
+
+		if (!ReferenceEquals(TMP_Settings.defaultFontAsset, _defaultFontAsset))
+		{
+			TMP_Settings.defaultFontAsset = _defaultFontAsset;
+		}
+	}
+
+	private void EnsureFallbackFonts(TMP_FontAsset fontAsset)
+	{
+		if (_configuredFallbackFonts.Count == 0)
+		{
+			return;
+		}
+
+		if (fontAsset.fallbackFontAssetTable is null)
+		{
+			fontAsset.fallbackFontAssetTable = new List<TMP_FontAsset>(_configuredFallbackFonts);
+			return;
+		}
+
+		foreach (var fallback in _configuredFallbackFonts)
+		{
+			if (!fontAsset.fallbackFontAssetTable.Contains(fallback))
+			{
+				fontAsset.fallbackFontAssetTable.Add(fallback);
+			}
+		}
 	}
 
 	private void ApplyHiddenBaseLayoutStyle()
@@ -479,9 +600,14 @@ public sealed class TmpSubtitleOverlay
 			baseRect.anchorMax = new Vector2(0f, 0f);
 			baseRect.pivot = new Vector2(0f, 0f);
 			baseRect.anchoredPosition = Vector2.zero;
+			ApplyTmpGlobalDefaultFont();
 			var baseText = baseGo.AddComponent<TextMeshProUGUI>();
 			baseText.richText = false;
 			baseText.textWrappingMode = TextWrappingModes.NoWrap;
+			if (_defaultFontAsset is not null)
+			{
+				baseText.font = _defaultFontAsset;
+			}
 
 			var maskGo = new GameObject("FillMask");
 			maskGo.transform.SetParent(rootGo.transform, false);
@@ -499,9 +625,14 @@ public sealed class TmpSubtitleOverlay
 			fillRect.anchorMax = new Vector2(0f, 0f);
 			fillRect.pivot = new Vector2(0f, 0f);
 			fillRect.anchoredPosition = Vector2.zero;
+			ApplyTmpGlobalDefaultFont();
 			var fillText = fillGo.AddComponent<TextMeshProUGUI>();
 			fillText.richText = false;
 			fillText.textWrappingMode = TextWrappingModes.NoWrap;
+			if (_defaultFontAsset is not null)
+			{
+				fillText.font = _defaultFontAsset;
+			}
 
 			_karaokeTextPool.Add(new KaraokeSegmentView
 			{
