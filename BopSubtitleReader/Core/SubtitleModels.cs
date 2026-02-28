@@ -36,9 +36,20 @@ public sealed class SubtitleCueStyle
 	public string? FontName { get; set; }
 	public float? FontSize { get; set; }
 	public string? ColorHexRgba { get; set; }
+	public string? SecondaryColorHexRgba { get; set; }
+	public string? OutlineColorHexRgba { get; set; }
+	public float? OutlineWidth { get; set; }
 	public bool? Bold { get; set; }
 	public bool? Italic { get; set; }
 	public int? Alignment { get; set; }
+}
+
+public enum KaraokeTagType
+{
+	None = 0,
+	K = 1,
+	Kf = 2,
+	Ko = 3
 }
 
 public sealed class KaraokeSegment
@@ -46,6 +57,21 @@ public sealed class KaraokeSegment
 	public string Text { get; set; } = string.Empty;
 	public float? Beat { get; set; }
 	public double? Seconds { get; set; }
+	public double? DurationSeconds { get; set; }
+	public KaraokeTagType TagType { get; set; } = KaraokeTagType.K;
+	public int? StartCharIndex { get; set; }
+	public int? CharLength { get; set; }
+}
+
+public sealed class KaraokeRenderSegment
+{
+	public int StartCharIndex { get; set; }
+	public int CharLength { get; set; }
+	public string Text { get; set; } = string.Empty;
+	public string BaseFaceColorHexRgba { get; set; } = "#FFFFFFFF";
+	public string FillFaceColorHexRgba { get; set; } = "#FFFFFFFF";
+	public string OutlineColorHexRgba { get; set; } = "#000000FF";
+	public float FillProgress { get; set; } = 1f;
 }
 
 public sealed class SubtitleTrack

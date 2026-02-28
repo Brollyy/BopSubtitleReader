@@ -41,7 +41,7 @@
     <PackageReference Include="BepInEx.Core" Version="5.*"/>
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*"/>
     <PackageReference Include="System.Text.Json" Version="8.*"/>
-    <PackageReference Include="Unity3D.UnityEngine" Version="2018.3.5.1" IncludeAssets="compile" Condition="'$(SkipGameReferences)' == 'true'"/>
+    <PackageReference Include="UnityEngine.Modules" Version="2021.3.33" IncludeAssets="compile"/>
     <Reference Include="UnityEngine" Condition="'$(SkipGameReferences)' != 'true' and Exists('$(UnityManagedDir)/UnityEngine.dll')">
       <HintPath>$(UnityManagedDir)/UnityEngine.dll</HintPath>
       <Private>false</Private>
@@ -63,10 +63,6 @@
   <ItemGroup>
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <EmbeddedResource Include="assets/karaoke_bop.png"/>
   </ItemGroup>
 
   <Target Name="ValidateTemplateDependencies" BeforeTargets="ResolveReferences" Condition="'$(SkipGameReferences)' != 'true'">

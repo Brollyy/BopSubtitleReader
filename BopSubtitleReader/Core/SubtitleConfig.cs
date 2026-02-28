@@ -28,9 +28,9 @@ public sealed class SubtitleConfig(ConfigFile config)
 		true,
 		"If selected language and English are missing, use catalog default language.");
 
-	public ConfigEntry<string> KaraokeMode { get; } = config.Bind(
+	public ConfigEntry<bool> KaraokeEnabled { get; } = config.Bind(
 		"Subtitles",
-		"KaraokeMode",
-		"Auto",
-		"Off, Auto, or Force. Auto attempts game karaoke indicator first when subtitle data provides segments.");
+		"KaraokeEnabled",
+		true,
+		"Enable karaoke tag timing effects in subtitle text when segment data is available.");
 }

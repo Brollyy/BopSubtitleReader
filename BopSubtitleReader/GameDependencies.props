@@ -1,5 +1,7 @@
 <Project>
   <ItemGroup>
     <GameLibrary Include="Assembly-CSharp" />
+    <GameLibrary Include="Unity.TextMeshPro" />
+    <GameLibrary Include="UnityEngine.UI" />
   </ItemGroup>
 </Project>

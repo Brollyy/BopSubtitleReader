@@ -1,10 +1,10 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using HarmonyLib;
+using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
+using Object = UnityEngine.Object;
 
 namespace BopSubtitleReader.Core;
 
@@ -15,37 +15,97 @@ public sealed class TmpSubtitleOverlay
 	private bool _initializationAttempted;
 	private bool _available;
 	private GameObject? _host;
-	private Component? _tmpComponent;
-	private PropertyInfo? _textProperty;
-	private PropertyInfo? _fontSizeProperty;
-	private PropertyInfo? _fontProperty;
-	private Type? _fontAssetType;
-	private PropertyInfo? _fontAssetSourceFileProperty;
-	private PropertyInfo? _fallbackFontAssetTableProperty;
-	private PropertyInfo? _colorProperty;
-	private PropertyInfo? _fontStyleProperty;
-	private PropertyInfo? _alignmentProperty;
-	private PropertyInfo? _horizontalAlignmentProperty;
-	private PropertyInfo? _verticalAlignmentProperty;
+	private Canvas? _canvas;
+	private TextMeshProUGUI? _tmpText;
+	private RectTransform? _tmpRect;
+	private GameObject? _karaokeLayer;
+	private readonly List<KaraokeSegmentView> _karaokeTextPool = [];
+	private TMP_FontAsset? _defaultFontAsset;
+	private readonly Dictionary<string, TMP_FontAsset> _runtimeFontCache = new(StringComparer.OrdinalIgnoreCase);
+	private readonly HashSet<string> _failedFontLookups = new(StringComparer.OrdinalIgnoreCase);
+	private readonly HashSet<string> _missingRequestedFontsWarned = new(StringComparer.OrdinalIgnoreCase);
+	private readonly List<TMP_FontAsset> _configuredFallbackFonts = [];
 	private OverlayStyleState _defaultStyle = OverlayStyleState.CreateDefault();
-	private readonly Dictionary<string, UnityEngine.Object> _fontAssetByKey = new(StringComparer.OrdinalIgnoreCase);
-	private readonly List<UnityEngine.Object> _fontAssets = [];
-	private UnityEngine.Object? _defaultFontAsset;
 
 	public void SetText(string text, SubtitleCueStyle? style)
 	{
-		if (!EnsureInitialized())
+		if (!EnsureInitialized() || _tmpText is null || _host is null)
 		{
 			return;
 		}
 
-		if (_tmpComponent is null || _textProperty is null || _host is null)
+		ApplyStyle(_tmpText, style);
+		_tmpText.text = text;
+		// Force TMP to rebuild the mesh immediately so textInfo.characterInfo reflects the
+		// current text and layout before GetSegmentViewportPosition queries it this frame.
+		_tmpText.ForceMeshUpdate();
+		HideKaraokeLayer();
+		if (!_host.activeSelf)
+		{
+			_host.SetActive(true);
+		}
+	}
+
+	public void SetKaraokeText(string text, SubtitleCueStyle? style, IReadOnlyList<KaraokeRenderSegment> segments)
+	{
+		if (!EnsureInitialized() || _tmpText is null || _tmpRect is null || _host is null)
 		{
 			return;
 		}
 
-		ApplyStyle(style);
-		_textProperty.SetValue(_tmpComponent, text);
+		ApplyStyle(_tmpText, style);
+		_tmpText.text = text;
+		ApplyHiddenBaseLayoutStyle();
+		_tmpText.ForceMeshUpdate();
+
+		var layer = EnsureKaraokeLayer();
+		if (layer is null)
+		{
+			return;
+		}
+
+		for (var i = 0; i < segments.Count; i++)
+		{
+			var segment = segments[i];
+			if (!TryGetSegmentAnchor(segment.StartCharIndex, segment.CharLength, out var anchorX, out var anchorY))
+			{
+				SetKaraokeLabelActive(i, false);
+				continue;
+			}
+
+			var label = EnsureKaraokeLabel(i);
+			if (label is null)
+			{
+				continue;
+			}
+
+			var rootRect = label.RootRect;
+			rootRect.anchoredPosition = new Vector2(anchorX, anchorY);
+			var segmentRectSize = new Vector2(Mathf.Max(4f, _tmpRect.rect.width), Mathf.Max(4f, _tmpRect.rect.height));
+			rootRect.sizeDelta = segmentRectSize;
+			label.BaseRect.sizeDelta = segmentRectSize;
+			label.FillRect.sizeDelta = segmentRectSize;
+			label.MaskRect.anchoredPosition = Vector2.zero;
+
+			ApplyStyle(label.BaseText, style, segment.BaseFaceColorHexRgba, segment.OutlineColorHexRgba);
+			ApplyStyle(label.FillText, style, segment.FillFaceColorHexRgba, segment.OutlineColorHexRgba);
+			label.BaseText.alignment = TextAlignmentOptions.BottomLeft;
+			label.FillText.alignment = TextAlignmentOptions.BottomLeft;
+			label.BaseText.textWrappingMode = TextWrappingModes.NoWrap;
+			label.FillText.textWrappingMode = TextWrappingModes.NoWrap;
+			label.BaseText.text = segment.Text;
+			label.FillText.text = segment.Text;
+			label.FillText.ForceMeshUpdate();
+			var fillWidth = Mathf.Max(0f, label.FillText.preferredWidth);
+			label.MaskRect.sizeDelta = new Vector2(fillWidth * Mathf.Clamp01(segment.FillProgress), segmentRectSize.y);
+			SetKaraokeLabelActive(i, true);
+		}
+
+		for (var i = segments.Count; i < _karaokeTextPool.Count; i++)
+		{
+			SetKaraokeLabelActive(i, false);
+		}
+
 		if (!_host.activeSelf)
 		{
 			_host.SetActive(true);
@@ -57,6 +117,39 @@ public sealed class TmpSubtitleOverlay
 		if (_host is not null && _host.activeSelf)
 		{
 			_host.SetActive(false);
+		}
+	}
+
+	public void SetCamera(Camera? camera)
+	{
+		if (!EnsureInitialized() || _canvas is null)
+		{
+			return;
+		}
+
+		if (camera is not null)
+		{
+			if (_canvas.renderMode != RenderMode.ScreenSpaceCamera)
+			{
+				_canvas.renderMode = RenderMode.ScreenSpaceCamera;
+			}
+
+			if (!ReferenceEquals(_canvas.worldCamera, camera))
+			{
+				_canvas.worldCamera = camera;
+			}
+
+			return;
+		}
+
+		if (_canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+		{
+			_canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+		}
+
+		if (_canvas.worldCamera is not null)
+		{
+			_canvas.worldCamera = null;
 		}
 	}
 
@@ -73,44 +166,14 @@ public sealed class TmpSubtitleOverlay
 		}
 
 		_initializationAttempted = true;
-		var tmpType = AccessTools.TypeByName("TMPro.TextMeshProUGUI")
-					  ?? AccessTools.TypeByName("TMPro.TMP_Text");
-		if (tmpType is null)
-		{
-			Log.Warn("TMP type not found. Subtitle overlay disabled.");
-			return false;
-		}
-
-		_textProperty = tmpType.GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
-		_fontSizeProperty = tmpType.GetProperty("fontSize", BindingFlags.Public | BindingFlags.Instance);
-		_fontProperty = tmpType.GetProperty("font", BindingFlags.Public | BindingFlags.Instance);
-		_fontAssetType = _fontProperty?.PropertyType;
-		_fontAssetSourceFileProperty = _fontAssetType?.GetProperty("sourceFontFile", BindingFlags.Public | BindingFlags.Instance);
-		_fallbackFontAssetTableProperty = _fontAssetType?.GetProperty("fallbackFontAssetTable", BindingFlags.Public | BindingFlags.Instance);
-		_colorProperty = tmpType.GetProperty("color", BindingFlags.Public | BindingFlags.Instance);
-		_fontStyleProperty = tmpType.GetProperty("fontStyle", BindingFlags.Public | BindingFlags.Instance);
-		_alignmentProperty = tmpType.GetProperty("alignment", BindingFlags.Public | BindingFlags.Instance);
-		_horizontalAlignmentProperty = tmpType.GetProperty("horizontalAlignment", BindingFlags.Public | BindingFlags.Instance);
-		_verticalAlignmentProperty = tmpType.GetProperty("verticalAlignment", BindingFlags.Public | BindingFlags.Instance);
-		if (_textProperty is null)
-		{
-			Log.Warn("TMP text property not found. Subtitle overlay disabled.");
-			return false;
-		}
-
-		var canvasType = AccessTools.TypeByName("UnityEngine.Canvas");
-		if (canvasType is null)
-		{
-			Log.Warn("Unity Canvas type not found. Subtitle overlay disabled.");
-			return false;
-		}
 
 		var canvasObject = new GameObject("BOP_SubtitleCanvas");
-		UnityEngine.Object.DontDestroyOnLoad(canvasObject);
+		Object.DontDestroyOnLoad(canvasObject);
 
-		var canvas = canvasObject.AddComponent(canvasType);
-		SetEnumProperty(canvasType, canvas, "renderMode", "ScreenSpaceOverlay");
-		SetProperty(canvasType, canvas, "sortingOrder", 32000);
+		var canvas = canvasObject.AddComponent<Canvas>();
+		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+		canvas.sortingOrder = 100;
+		_canvas = canvas;
 
 		var textObject = new GameObject("BOP_SubtitleText");
 		textObject.transform.SetParent(canvasObject.transform, false);
@@ -121,10 +184,20 @@ public sealed class TmpSubtitleOverlay
 		rect.offsetMin = Vector2.zero;
 		rect.offsetMax = Vector2.zero;
 
-		_tmpComponent = textObject.AddComponent(tmpType);
-		ConfigureTmpComponent(_tmpComponent, tmpType);
-		BuildFontCatalog();
-		AssignDefaultFontAsset(_tmpComponent);
+		AssignDefaultFontAsset();
+		ApplyTmpGlobalDefaultFont();
+
+		_tmpText = textObject.AddComponent<TextMeshProUGUI>();
+		if (_defaultFontAsset is not null)
+		{
+			_tmpText.font = _defaultFontAsset;
+		}
+		_tmpRect = rect;
+		_tmpText.fontSize = 40f;
+		_tmpText.textWrappingMode = TextWrappingModes.Normal;
+		_tmpText.richText = true;
+		_tmpText.alignment = TextAlignmentOptions.Bottom;
+
 		CaptureDefaultStyle();
 
 		_host = canvasObject;
@@ -136,440 +209,470 @@ public sealed class TmpSubtitleOverlay
 
 	private void CaptureDefaultStyle()
 	{
-		if (_tmpComponent is null)
+		if (_tmpText is null)
 		{
 			return;
 		}
 
 		_defaultStyle = new OverlayStyleState
 		{
-			FontSize = ReadFloat(_fontSizeProperty, _tmpComponent) ?? 40f,
-			Color = ReadColor(_colorProperty, _tmpComponent) ?? Color.white,
+			FontSize = _tmpText.fontSize,
+			Color = _tmpText.color,
+			OutlineColor = Color.black,
+			OutlineWidth = 2f,
 			Bold = false,
 			Italic = false,
 			Alignment = 2
 		};
 	}
 
-	private void ApplyStyle(SubtitleCueStyle? style)
+	private void ApplyStyle(TextMeshProUGUI text, SubtitleCueStyle? style, string? faceColorOverrideHex = null, string? outlineColorOverrideHex = null)
 	{
-		if (_tmpComponent is null)
-		{
-			return;
-		}
+		ApplyFont(text, style?.FontName);
 
-		ApplyFont(style?.FontName);
-
-		var fontSize = style?.FontSize ?? _defaultStyle.FontSize;
-		SetProperty(_fontSizeProperty, _tmpComponent, fontSize);
+		text.fontSize = style?.FontSize ?? _defaultStyle.FontSize;
 
 		var color = _defaultStyle.Color;
-		var colorHex = style?.ColorHexRgba;
+		var colorHex = string.IsNullOrWhiteSpace(faceColorOverrideHex) ? style?.ColorHexRgba : faceColorOverrideHex;
 		if (!string.IsNullOrWhiteSpace(colorHex)
-			&& ColorUtility.TryParseHtmlString(colorHex, out var parsedColor))
+		&& ColorUtility.TryParseHtmlString(colorHex, out var parsedColor))
 		{
 			color = parsedColor;
 		}
-		SetProperty(_colorProperty, _tmpComponent, color);
+
+		text.color = color;
+
+		var outlineColor = _defaultStyle.OutlineColor;
+		var outlineHex = string.IsNullOrWhiteSpace(outlineColorOverrideHex) ? style?.OutlineColorHexRgba : outlineColorOverrideHex;
+		if (!string.IsNullOrWhiteSpace(outlineHex)
+			&& ColorUtility.TryParseHtmlString(outlineHex, out var parsedOutline))
+		{
+			outlineColor = parsedOutline;
+		}
+
+		var assOutlineWidth = style?.OutlineWidth ?? _defaultStyle.OutlineWidth;
+		var tmpOutlineWidth = Mathf.Clamp(assOutlineWidth * 0.04f, 0f, 0.25f);
+		ApplyOutline(text, outlineColor, tmpOutlineWidth);
 
 		var bold = style?.Bold ?? _defaultStyle.Bold;
 		var italic = style?.Italic ?? _defaultStyle.Italic;
-		SetTmpFontStyle(bold, italic);
+		var fontStyle = FontStyles.Normal;
+		if (bold)
+		{
+			fontStyle |= FontStyles.Bold;
+		}
+
+		if (italic)
+		{
+			fontStyle |= FontStyles.Italic;
+		}
+
+		text.fontStyle = fontStyle;
 
 		var alignment = style?.Alignment ?? _defaultStyle.Alignment;
-		SetTmpAlignment(alignment);
-	}
-
-	private void SetTmpFontStyle(bool bold, bool italic)
-	{
-		if (_tmpComponent is null || _fontStyleProperty is null || !_fontStyleProperty.CanWrite || !_fontStyleProperty.PropertyType.IsEnum)
+		text.alignment = alignment switch
 		{
-			return;
-		}
-
-		var flags = 0;
-		if (bold && TryGetEnumIntValue(_fontStyleProperty.PropertyType, "Bold", out var boldValue))
-		{
-			flags |= boldValue;
-		}
-
-		if (italic && TryGetEnumIntValue(_fontStyleProperty.PropertyType, "Italic", out var italicValue))
-		{
-			flags |= italicValue;
-		}
-
-		if (flags == 0 && TryGetEnumValue(_fontStyleProperty.PropertyType, "Normal", out var normal))
-		{
-			_fontStyleProperty.SetValue(_tmpComponent, normal);
-			return;
-		}
-
-		var enumValue = Enum.ToObject(_fontStyleProperty.PropertyType, flags);
-		_fontStyleProperty.SetValue(_tmpComponent, enumValue);
-	}
-
-	private void SetTmpAlignment(int assAlignment)
-	{
-		if (_tmpComponent is null)
-		{
-			return;
-		}
-
-		var anchorName = assAlignment switch
-		{
-			1 => "BottomLeft",
-			2 => "Bottom",
-			3 => "BottomRight",
-			4 => "Left",
-			5 => "Center",
-			6 => "Right",
-			7 => "TopLeft",
-			8 => "Top",
-			9 => "TopRight",
-			_ => "Bottom"
+			1 => TextAlignmentOptions.BottomLeft,
+			2 => TextAlignmentOptions.Bottom,
+			3 => TextAlignmentOptions.BottomRight,
+			4 => TextAlignmentOptions.Left,
+			5 => TextAlignmentOptions.Center,
+			6 => TextAlignmentOptions.Right,
+			7 => TextAlignmentOptions.TopLeft,
+			8 => TextAlignmentOptions.Top,
+			9 => TextAlignmentOptions.TopRight,
+			_ => TextAlignmentOptions.Bottom
 		};
-
-		if (!SetEnumPropertyValue(_alignmentProperty, _tmpComponent, anchorName))
-		{
-			SetHorizontalVerticalFallback(assAlignment);
-		}
 	}
 
-	private void SetHorizontalVerticalFallback(int assAlignment)
+	/// <summary>
+	/// Loads a TMP font asset from Unity's standard "Fonts &amp; Materials" resource folder.
+	/// </summary>
+	private static TMP_FontAsset? LoadFontAsset(string fontName)
 	{
-		var horizontal = (assAlignment % 3) switch
-		{
-			1 => "Left",
-			2 => "Center",
-			0 => "Right",
-			_ => "Center"
-		};
-
-		var vertical = assAlignment switch
-		{
-			>= 1 and <= 3 => "Bottom",
-			>= 4 and <= 6 => "Middle",
-			>= 7 and <= 9 => "Top",
-			_ => "Bottom"
-		};
-
-		if (_tmpComponent is null)
-		{
-			return;
-		}
-
-		SetEnumPropertyValue(_horizontalAlignmentProperty, _tmpComponent, horizontal);
-		SetEnumPropertyValue(_verticalAlignmentProperty, _tmpComponent, vertical);
+		return Resources.Load<TMP_FontAsset>($"Fonts & Materials/{fontName}");
 	}
 
-	private static void ConfigureTmpComponent(Component component, Type type)
+	private void AssignDefaultFontAsset()
 	{
-		SetProperty(type, component, "fontSize", 40f);
-		SetProperty(type, component, "enableWordWrapping", true);
-		SetProperty(type, component, "richText", true);
-		SetEnumProperty(type, component, "alignment", "Bottom");
-		SetEnumProperty(type, component, "horizontalAlignment", "Center");
-		SetEnumProperty(type, component, "verticalAlignment", "Bottom");
-	}
-
-	private void BuildFontCatalog()
-	{
-		_fontAssetByKey.Clear();
-		_fontAssets.Clear();
-		if (_fontAssetType is null)
+		string[] primaryCandidates = ["NotInter-Regular", "Arial", "Kardia Fat Runner"];
+		TMP_FontAsset? primary = null;
+		foreach (var name in primaryCandidates)
 		{
-			return;
-		}
-
-		UnityEngine.Object[] loadedAssets = Resources.FindObjectsOfTypeAll(_fontAssetType);
-		for (var i = 0; i < loadedAssets.Length; i++)
-		{
-			UnityEngine.Object asset = loadedAssets[i];
-			if (asset is null)
+			primary = ResolveFontAsset(name, allowRuntimeFontCreate: true);
+			if (primary is not null)
 			{
-				continue;
+				Log.Info($"Primary subtitle font: {primary.name} (requested: {name}).");
+				break;
 			}
-
-			_fontAssets.Add(asset);
-			RegisterFontAssetKey(asset.name, asset);
-			string? sourceFontName = ReadSourceFontName(asset);
-			if (!string.IsNullOrWhiteSpace(sourceFontName))
-			{
-				RegisterFontAssetKey(sourceFontName!, asset);
-			}
-		}
-	}
-
-	private void AssignDefaultFontAsset(Component component)
-	{
-		if (_fontProperty is null || !_fontProperty.CanWrite)
-		{
-			return;
-		}
-
-		UnityEngine.Object? selected = SelectFallbackFontAsset();
-		if (selected is null)
-		{
-			Log.Warn("No TMP font asset found for subtitle overlay.");
-			return;
-		}
-
-		_fontProperty.SetValue(component, selected);
-		ConfigureFallbackFonts(selected);
-		_defaultFontAsset = selected;
-		Log.Info($"Assigned TMP font asset '{selected.name}' to subtitle overlay.");
-	}
-
-	private void ApplyFont(string? requestedFontName)
-	{
-		if (_tmpComponent is null || _fontProperty is null || !_fontProperty.CanWrite)
-		{
-			return;
-		}
-
-		UnityEngine.Object? selected = null;
-		if (!string.IsNullOrWhiteSpace(requestedFontName))
-		{
-			selected = ResolveFontAsset(requestedFontName!);
-			if (selected is null)
-			{
-				Log.Warn($"Requested subtitle font '{requestedFontName}' was not found. Using fallback.");
-			}
-		}
-
-		selected ??= _defaultFontAsset ?? SelectFallbackFontAsset();
-		if (selected is null)
-		{
-			return;
-		}
-
-		_fontProperty.SetValue(_tmpComponent, selected);
-	}
-
-	private UnityEngine.Object? SelectFallbackFontAsset()
-	{
-		string[] preferred = [
-			"NotInter-Regular SDF",
-			"NotInter-Regular",
-			"Arial SDF",
-			"Arial",
-			"Kardia Fat Runner SDF",
-			"MPLUSRounded1c-Regular SDF",
-			"TaiwanPearl-Regular SDF",
-			"Binggrae SDF"
-		];
-
-		for (var i = 0; i < preferred.Length; i++)
-		{
-			UnityEngine.Object? resolved = ResolveFontAsset(preferred[i]);
-			if (resolved is not null)
-			{
-				return resolved;
-			}
-		}
-
-		return _fontAssets.Count > 0 ? _fontAssets[0] : null;
-	}
-
-	private void ConfigureFallbackFonts(UnityEngine.Object primaryFontAsset)
-	{
-		if (_fontAssetType is null || _fallbackFontAssetTableProperty is null || !_fallbackFontAssetTableProperty.CanWrite)
-		{
-			return;
 		}
 
 		string[] cjkFallbacks = ["MPLUSRounded1c-Regular SDF", "TaiwanPearl-Regular SDF", "Binggrae SDF"];
-		IList fallbackList = (IList)(Activator.CreateInstance(typeof(List<>).MakeGenericType(_fontAssetType))
-			?? throw new InvalidOperationException("Failed to create TMP fallback list."));
-
-		for (var i = 0; i < cjkFallbacks.Length; i++)
+		var fallbackList = new List<TMP_FontAsset>();
+		foreach (var name in cjkFallbacks)
 		{
-			UnityEngine.Object? fallback = ResolveFontAsset(cjkFallbacks[i]);
-			if (fallback is null || ReferenceEquals(fallback, primaryFontAsset) || fallbackList.Contains(fallback))
+			var fallback = ResolveFontAsset(name, allowRuntimeFontCreate: true);
+			if (fallback is not null && !ReferenceEquals(fallback, primary))
 			{
-				continue;
+				fallbackList.Add(fallback);
 			}
-
-			fallbackList.Add(fallback);
 		}
 
+		if (primary is null && fallbackList.Count > 0)
+		{
+			primary = fallbackList[0];
+			fallbackList.RemoveAt(0);
+			Log.Warn($"No preferred primary subtitle font found. Promoting fallback '{primary.name}' as primary.");
+		}
+
+		if (primary is null)
+		{
+			Log.Warn("No primary TMP font asset found for subtitle overlay.");
+			return;
+		}
+
+		_configuredFallbackFonts.Clear();
+		_configuredFallbackFonts.AddRange(fallbackList);
 		if (fallbackList.Count > 0)
 		{
-			_fallbackFontAssetTableProperty.SetValue(primaryFontAsset, fallbackList);
-			Log.Info($"Configured {fallbackList.Count} TMP fallback font(s) for subtitle overlay.");
+			primary.fallbackFontAssetTable = fallbackList;
+			Log.Info($"Configured {fallbackList.Count} CJK fallback font(s) for subtitle overlay.");
 		}
+
+		_defaultFontAsset = primary;
 	}
 
-	private UnityEngine.Object? ResolveFontAsset(string requestedFontName)
+	private void ApplyFont(TextMeshProUGUI text, string? requestedFontName)
 	{
-		string normalized = NormalizeFontKey(requestedFontName);
-		if (_fontAssetByKey.TryGetValue(normalized, out UnityEngine.Object? exact))
+		TMP_FontAsset? selected = null;
+		if (!string.IsNullOrWhiteSpace(requestedFontName))
 		{
-			return exact;
-		}
+			selected = ResolveFontAsset(requestedFontName!, allowRuntimeFontCreate: false);
 
-		if (_fontAssets.Count == 0)
-		{
-			return null;
-		}
-
-		for (var i = 0; i < _fontAssets.Count; i++)
-		{
-			UnityEngine.Object candidate = _fontAssets[i];
-			string candidateKey = NormalizeFontKey(candidate.name);
-			if (candidateKey.Contains(normalized) || normalized.Contains(candidateKey))
+			if (selected is null)
 			{
-				return candidate;
-			}
-
-			string? sourceFontName = ReadSourceFontName(candidate);
-			if (!string.IsNullOrWhiteSpace(sourceFontName))
-			{
-				string sourceKey = NormalizeFontKey(sourceFontName!);
-				if (sourceKey.Contains(normalized) || normalized.Contains(sourceKey))
+				if (_missingRequestedFontsWarned.Add(requestedFontName!))
 				{
-					return candidate;
+					Log.Warn($"Requested subtitle font '{requestedFontName}' was not found. Using fallback.");
 				}
 			}
 		}
 
-		return null;
-	}
-
-	private string? ReadSourceFontName(UnityEngine.Object fontAsset)
-	{
-		if (_fontAssetSourceFileProperty is null)
-		{
-			return null;
-		}
-
-		object? source = _fontAssetSourceFileProperty.GetValue(fontAsset);
-		return source is UnityEngine.Object sourceObject ? sourceObject.name : null;
-	}
-
-	private void RegisterFontAssetKey(string key, UnityEngine.Object asset)
-	{
-		string normalized = NormalizeFontKey(key);
-		if (normalized.Length == 0 || _fontAssetByKey.ContainsKey(normalized))
+		selected ??= _defaultFontAsset;
+		if (selected is null)
 		{
 			return;
 		}
 
-		_fontAssetByKey[normalized] = asset;
+		EnsureFallbackFonts(selected);
+		text.font = selected;
 	}
 
-	private static string NormalizeFontKey(string key)
+	private TMP_FontAsset? ResolveFontAsset(string fontName, bool allowRuntimeFontCreate)
 	{
-		return new string(key.Where(ch => char.IsLetterOrDigit(ch)).ToArray()).ToLowerInvariant();
-	}
-
-	private static float? ReadFloat(PropertyInfo? property, object target)
-	{
-		if (property is null || !property.CanRead)
+		if (string.IsNullOrWhiteSpace(fontName))
 		{
 			return null;
 		}
 
-		var value = property.GetValue(target);
-		if (value is float number)
-		{
-			return number;
-		}
-
-		return null;
-	}
-
-	private static Color? ReadColor(PropertyInfo? property, object target)
-	{
-		if (property is null || !property.CanRead)
+		if (_failedFontLookups.Contains(fontName))
 		{
 			return null;
 		}
 
-		var value = property.GetValue(target);
-		if (value is Color color)
+		if (_runtimeFontCache.TryGetValue(fontName, out var cached))
 		{
-			return color;
+			return cached;
 		}
 
-		if (value is Color32 color32)
+		var direct = LoadFontAsset(fontName);
+		if (direct is null && !fontName.EndsWith(" SDF", StringComparison.OrdinalIgnoreCase))
 		{
-			return color32;
+			direct = LoadFontAsset($"{fontName} SDF");
 		}
 
-		return null;
-	}
-
-	private static bool SetEnumPropertyValue(PropertyInfo? property, object target, string enumValue)
-	{
-		if (property is null || !property.CanWrite || !property.PropertyType.IsEnum)
+		if (direct is not null)
 		{
-			return false;
+			_runtimeFontCache[fontName] = direct;
+			return direct;
 		}
 
-		if (TryGetEnumValue(property.PropertyType, enumValue, out var value))
+		if (!allowRuntimeFontCreate)
 		{
-			property.SetValue(target, value);
-			return true;
+			_failedFontLookups.Add(fontName);
+			return null;
 		}
 
-		return false;
-	}
-
-	private static bool TryGetEnumValue(Type enumType, string name, out object? value)
-	{
-		var values = Enum.GetValues(enumType);
-		foreach (var item in values)
+		var sourceName = fontName.EndsWith(" SDF", StringComparison.OrdinalIgnoreCase)
+			? fontName.Substring(0, fontName.Length - 4)
+			: fontName;
+		var fonts = Resources.FindObjectsOfTypeAll<Font>();
+		var sourceFont = fonts.FirstOrDefault(f => string.Equals(f.name, sourceName, StringComparison.OrdinalIgnoreCase))
+			?? fonts.FirstOrDefault(f => string.Equals(f.name, fontName, StringComparison.OrdinalIgnoreCase));
+		if (sourceFont is null)
 		{
-			if (string.Equals(item.ToString(), name, StringComparison.OrdinalIgnoreCase))
+			_failedFontLookups.Add(fontName);
+			return null;
+		}
+
+		try
+		{
+			var created = TMP_FontAsset.CreateFontAsset(sourceFont);
+			if (created is null)
 			{
-				value = item;
-				return true;
+				return null;
+			}
+
+			_runtimeFontCache[fontName] = created;
+			_runtimeFontCache[sourceFont.name] = created;
+			Log.Info($"Created runtime TMP font asset from source font '{sourceFont.name}'.");
+			return created;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"Failed to create TMP font asset from '{sourceFont.name}': {ex.Message}");
+			_failedFontLookups.Add(fontName);
+			return null;
+		}
+	}
+
+	private void ApplyTmpGlobalDefaultFont()
+	{
+		if (_defaultFontAsset is null)
+		{
+			return;
+		}
+
+		if (TMP_Settings.instance is null)
+		{
+			return;
+		}
+
+		if (!ReferenceEquals(TMP_Settings.defaultFontAsset, _defaultFontAsset))
+		{
+			TMP_Settings.defaultFontAsset = _defaultFontAsset;
+		}
+	}
+
+	private void EnsureFallbackFonts(TMP_FontAsset fontAsset)
+	{
+		if (_configuredFallbackFonts.Count == 0)
+		{
+			return;
+		}
+
+		if (fontAsset.fallbackFontAssetTable is null)
+		{
+			fontAsset.fallbackFontAssetTable = new List<TMP_FontAsset>(_configuredFallbackFonts);
+			return;
+		}
+
+		foreach (var fallback in _configuredFallbackFonts)
+		{
+			if (!fontAsset.fallbackFontAssetTable.Contains(fallback))
+			{
+				fontAsset.fallbackFontAssetTable.Add(fallback);
 			}
 		}
-
-		value = null;
-		return false;
 	}
 
-	private static bool TryGetEnumIntValue(Type enumType, string name, out int value)
+	private void ApplyHiddenBaseLayoutStyle()
 	{
-		value = 0;
-		if (!TryGetEnumValue(enumType, name, out var enumValue) || enumValue is null)
-		{
-			return false;
-		}
-
-		value = Convert.ToInt32(enumValue, System.Globalization.CultureInfo.InvariantCulture);
-		return true;
-	}
-
-	private static void SetProperty(PropertyInfo? property, object target, object value)
-	{
-		if (property is null || !property.CanWrite)
+		if (_tmpText is null)
 		{
 			return;
 		}
 
-		property.SetValue(target, value);
+		var transparent = _tmpText.color;
+		transparent.a = 0f;
+		_tmpText.color = transparent;
+		ApplyOutline(_tmpText, new Color(0f, 0f, 0f, 0f), 0f);
 	}
 
-	private static void SetProperty(Type type, object target, string propertyName, object value)
+	private static void ApplyOutline(TextMeshProUGUI text, Color outlineColor, float outlineWidth)
 	{
-		var property = type.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
-		SetProperty(property, target, value);
+		var mat = text.fontMaterial;
+		if (mat is null)
+		{
+			return;
+		}
+
+		mat.EnableKeyword("OUTLINE_ON");
+		mat.SetFloat("_OutlineWidth", outlineWidth);
+		mat.SetColor("_OutlineColor", outlineColor);
+		text.UpdateMeshPadding();
 	}
 
-	private static void SetEnumProperty(Type type, object target, string propertyName, string enumValue)
+	private GameObject? EnsureKaraokeLayer()
 	{
-		var property = type.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
-		SetEnumPropertyValue(property, target, enumValue);
+		if (_karaokeLayer is not null)
+		{
+			_karaokeLayer.SetActive(true);
+			return _karaokeLayer;
+		}
+
+		if (_tmpText is null)
+		{
+			return null;
+		}
+
+		_karaokeLayer = new GameObject("BOP_KaraokeLayer");
+		_karaokeLayer.transform.SetParent(_tmpText.transform, false);
+		var rect = _karaokeLayer.AddComponent<RectTransform>();
+		rect.anchorMin = new Vector2(0f, 0f);
+		rect.anchorMax = new Vector2(1f, 1f);
+		rect.offsetMin = Vector2.zero;
+		rect.offsetMax = Vector2.zero;
+		return _karaokeLayer;
+	}
+
+	private KaraokeSegmentView? EnsureKaraokeLabel(int index)
+	{
+		while (_karaokeTextPool.Count <= index)
+		{
+			if (_karaokeLayer is null)
+			{
+				return null;
+			}
+
+			var rootGo = new GameObject($"KaraokeSeg_{_karaokeTextPool.Count:D2}");
+			rootGo.transform.SetParent(_karaokeLayer.transform, false);
+			var rootRect = rootGo.AddComponent<RectTransform>();
+			rootRect.anchorMin = new Vector2(0.5f, 0.5f);
+			rootRect.anchorMax = new Vector2(0.5f, 0.5f);
+			rootRect.pivot = new Vector2(0f, 0f);
+			rootRect.anchoredPosition = Vector2.zero;
+
+			var baseGo = new GameObject("Base");
+			baseGo.transform.SetParent(rootGo.transform, false);
+			var baseRect = baseGo.AddComponent<RectTransform>();
+			baseRect.anchorMin = new Vector2(0f, 0f);
+			baseRect.anchorMax = new Vector2(0f, 0f);
+			baseRect.pivot = new Vector2(0f, 0f);
+			baseRect.anchoredPosition = Vector2.zero;
+			ApplyTmpGlobalDefaultFont();
+			var baseText = baseGo.AddComponent<TextMeshProUGUI>();
+			baseText.richText = false;
+			baseText.textWrappingMode = TextWrappingModes.NoWrap;
+			if (_defaultFontAsset is not null)
+			{
+				baseText.font = _defaultFontAsset;
+			}
+
+			var maskGo = new GameObject("FillMask");
+			maskGo.transform.SetParent(rootGo.transform, false);
+			var maskRect = maskGo.AddComponent<RectTransform>();
+			maskRect.anchorMin = new Vector2(0f, 0f);
+			maskRect.anchorMax = new Vector2(0f, 0f);
+			maskRect.pivot = new Vector2(0f, 0f);
+			maskRect.anchoredPosition = Vector2.zero;
+			maskGo.AddComponent<RectMask2D>();
+
+			var fillGo = new GameObject("Fill");
+			fillGo.transform.SetParent(maskGo.transform, false);
+			var fillRect = fillGo.AddComponent<RectTransform>();
+			fillRect.anchorMin = new Vector2(0f, 0f);
+			fillRect.anchorMax = new Vector2(0f, 0f);
+			fillRect.pivot = new Vector2(0f, 0f);
+			fillRect.anchoredPosition = Vector2.zero;
+			ApplyTmpGlobalDefaultFont();
+			var fillText = fillGo.AddComponent<TextMeshProUGUI>();
+			fillText.richText = false;
+			fillText.textWrappingMode = TextWrappingModes.NoWrap;
+			if (_defaultFontAsset is not null)
+			{
+				fillText.font = _defaultFontAsset;
+			}
+
+			_karaokeTextPool.Add(new KaraokeSegmentView
+			{
+				Root = rootGo,
+				RootRect = rootRect,
+				BaseText = baseText,
+				BaseRect = baseRect,
+				FillText = fillText,
+				FillRect = fillRect,
+				MaskRect = maskRect
+			});
+		}
+
+		return _karaokeTextPool[index];
+	}
+
+	private void SetKaraokeLabelActive(int index, bool active)
+	{
+		if (index < 0 || index >= _karaokeTextPool.Count)
+		{
+			return;
+		}
+
+		var go = _karaokeTextPool[index].Root;
+		if (go is not null && go.activeSelf != active)
+		{
+			go.SetActive(active);
+		}
+	}
+
+	private void HideKaraokeLayer()
+	{
+		if (_karaokeLayer is not null && _karaokeLayer.activeSelf)
+		{
+			_karaokeLayer.SetActive(false);
+		}
+	}
+
+	private bool TryGetSegmentAnchor(int charStart, int charLength, out float anchorX, out float anchorY)
+	{
+		anchorX = 0f;
+		anchorY = 0f;
+		if (_tmpText is null || charLength <= 0)
+		{
+			return false;
+		}
+
+		var textInfo = _tmpText.textInfo;
+		if (textInfo is null || textInfo.characterCount <= 0)
+		{
+			return false;
+		}
+
+		var chars = textInfo.characterInfo;
+		if (chars is null || chars.Length == 0)
+		{
+			return false;
+		}
+
+		var clampedStart = Mathf.Clamp(charStart, 0, Math.Min(textInfo.characterCount, chars.Length) - 1);
+		var startInfo = chars[clampedStart];
+		anchorX = startInfo.bottomLeft.x;
+		anchorY = startInfo.baseLine;
+
+		// If the start glyph has unusual baseline metadata, derive a stable baseline from
+		// other visible characters in the same segment.
+		var max = Math.Min(clampedStart + charLength, Math.Min(textInfo.characterCount, chars.Length));
+		var baselineFound = false;
+		for (var i = clampedStart; i < max; i++)
+		{
+			var c = chars[i];
+			if (!c.isVisible)
+			{
+				continue;
+			}
+
+			anchorY = c.baseLine;
+			baselineFound = true;
+			break;
+		}
+
+		return baselineFound || clampedStart >= 0;
 	}
 
 	private sealed class OverlayStyleState
 	{
 		public float FontSize { get; set; }
 		public Color Color { get; set; }
+		public Color OutlineColor { get; set; }
+		public float OutlineWidth { get; set; }
 		public bool Bold { get; set; }
 		public bool Italic { get; set; }
 		public int Alignment { get; set; }
@@ -580,10 +683,23 @@ public sealed class TmpSubtitleOverlay
 			{
 				FontSize = 40f,
 				Color = Color.white,
+				OutlineColor = Color.black,
+				OutlineWidth = 2f,
 				Bold = false,
 				Italic = false,
 				Alignment = 2
 			};
 		}
+	}
+
+	private sealed class KaraokeSegmentView
+	{
+		public GameObject? Root { get; set; }
+		public RectTransform RootRect { get; set; } = null!;
+		public TextMeshProUGUI BaseText { get; set; } = null!;
+		public RectTransform BaseRect { get; set; } = null!;
+		public TextMeshProUGUI FillText { get; set; } = null!;
+		public RectTransform FillRect { get; set; } = null!;
+		public RectTransform MaskRect { get; set; } = null!;
 	}
 }

@@ -8,7 +8,6 @@ public sealed class SubtitleCoordinator(SubtitleConfig config)
 
 	public static SubtitleCoordinator? Instance { get; private set; }
 
-	private readonly KaraokeIndicatorAdapter _karaokeAdapter = new();
 	private readonly SubtitleParserStrategy _parserStrategy = new();
 	private SubtitleTrack? _pendingTrack;
 
@@ -45,7 +44,7 @@ public sealed class SubtitleCoordinator(SubtitleConfig config)
 		}
 
 		Log.Info($"Binding subtitle track '{_pendingTrack.Language}' to active loader.");
-		SubtitleRuntimeController.Instance.StartSession(loader, _pendingTrack, config, _karaokeAdapter);
+		SubtitleRuntimeController.Instance.StartSession(loader, _pendingTrack, config);
 	}
 
 	private void PrepareFromSource(string sourcePath)
