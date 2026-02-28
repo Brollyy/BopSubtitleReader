@@ -9,6 +9,7 @@ namespace BopSubtitleReader.Parser;
 public sealed class AssSubtitleParser : ISubtitleParser
 {
 	private static readonly ClassLogger Log = ClassLogger.GetForClass<AssSubtitleParser>();
+	private const string DefaultSecondaryColorHex = "#FFFF00FF";
 
 	private static readonly string[] LineSeparators = ["\r\n", "\n"];
 
@@ -126,6 +127,23 @@ public sealed class AssSubtitleParser : ISubtitleParser
 			style.ColorHexRgba = colorHex;
 		}
 
+		var secondaryColor = ReadValue(values, styleFormat, "secondarycolour");
+		if (TryParseAssColor(secondaryColor, out var secondaryHex))
+		{
+			style.SecondaryColorHexRgba = secondaryHex;
+		}
+
+		var outlineColor = ReadValue(values, styleFormat, "outlinecolour");
+		if (TryParseAssColor(outlineColor, out var outlineHex))
+		{
+			style.OutlineColorHexRgba = outlineHex;
+		}
+
+		if (TryParseFloat(ReadValue(values, styleFormat, "outline"), out var outlineWidth))
+		{
+			style.OutlineWidth = outlineWidth;
+		}
+
 		if (TryParseBoolNumeric(ReadValue(values, styleFormat, "bold"), out var bold))
 		{
 			style.Bold = bold;
@@ -218,7 +236,7 @@ public sealed class AssSubtitleParser : ISubtitleParser
 		var workingStyle = CloneStyle(baseStyle);
 		var builder = new StringBuilder(textRaw.Length);
 		double karaokeOffsetSeconds = 0;
-		int? pendingKaraokeCs = null;
+		PendingKaraoke? pendingKaraoke = null;
 
 		for (var index = 0; index < textRaw.Length;)
 		{
@@ -230,7 +248,11 @@ public sealed class AssSubtitleParser : ISubtitleParser
 					break;
 				}
 
-				ApplyOverrides(textRaw.Substring(index + 1, close - index - 1), workingStyle, ref pendingKaraokeCs);
+				ApplyOverrides(
+					textRaw.Substring(index + 1, close - index - 1),
+					workingStyle,
+					ref pendingKaraoke,
+					ref karaokeOffsetSeconds);
 				index = close + 1;
 				continue;
 			}
@@ -242,31 +264,40 @@ public sealed class AssSubtitleParser : ISubtitleParser
 			}
 
 			var chunk = NormalizeAssText(textRaw.Substring(index, nextOverride - index));
+			var segmentStart = builder.Length;
 			builder.Append(chunk);
 
-			if (pendingKaraokeCs.HasValue)
+			if (pendingKaraoke.HasValue)
 			{
-				var segmentText = chunk.Trim();
-				if (segmentText.Length > 0)
+				var karaoke = pendingKaraoke.Value;
+				if (chunk.Length > 0)
 				{
 					karaokeSegments.Add(new KaraokeSegment
 					{
-						Text = segmentText,
-						Seconds = startSeconds + karaokeOffsetSeconds
+						Text = chunk,
+						Seconds = startSeconds + karaokeOffsetSeconds,
+						DurationSeconds = karaoke.DurationCentiseconds / 100.0,
+						TagType = karaoke.TagType,
+						StartCharIndex = segmentStart,
+						CharLength = chunk.Length
 					});
-					karaokeOffsetSeconds += pendingKaraokeCs.Value / 100.0;
-					pendingKaraokeCs = null;
 				}
+				karaokeOffsetSeconds += karaoke.DurationCentiseconds / 100.0;
+				pendingKaraoke = null;
 			}
 
 			index = nextOverride;
 		}
 
-		visibleText = builder.ToString().Trim();
+		visibleText = builder.ToString();
 		cueStyle = HasStyleValues(workingStyle) ? workingStyle : null;
 	}
 
-	private static void ApplyOverrides(string block, SubtitleCueStyle style, ref int? pendingKaraokeCs)
+	private static void ApplyOverrides(
+		string block,
+		SubtitleCueStyle style,
+		ref PendingKaraoke? pendingKaraoke,
+		ref double karaokeOffsetSeconds)
 	{
 		var index = 0;
 		while (index < block.Length)
@@ -285,12 +316,16 @@ public sealed class AssSubtitleParser : ISubtitleParser
 			}
 
 			var tag = block.Substring(index, end - index);
-			ParseOverrideTag(tag, style, ref pendingKaraokeCs);
+			ParseOverrideTag(tag, style, ref pendingKaraoke, ref karaokeOffsetSeconds);
 			index = end;
 		}
 	}
 
-	private static void ParseOverrideTag(string rawTag, SubtitleCueStyle style, ref int? pendingKaraokeCs)
+	private static void ParseOverrideTag(
+		string rawTag,
+		SubtitleCueStyle style,
+		ref PendingKaraoke? pendingKaraoke,
+		ref double karaokeOffsetSeconds)
 	{
 		var tag = rawTag.Trim();
 		if (tag.Length == 0)
@@ -298,13 +333,13 @@ public sealed class AssSubtitleParser : ISubtitleParser
 			return;
 		}
 
-		if (StartsWithTag(tag, "k") || StartsWithTag(tag, "K") || StartsWithTag(tag, "kf") || StartsWithTag(tag, "ko"))
+		if (TryParseKaraokeTag(tag, out var karaoke))
 		{
-			var value = ExtractNumericSuffix(tag);
-			if (TryParseInt(value, out var centiseconds) && centiseconds > 0)
+			if (pendingKaraoke.HasValue)
 			{
-				pendingKaraokeCs = centiseconds;
+				karaokeOffsetSeconds += pendingKaraoke.Value.DurationCentiseconds / 100.0;
 			}
+			pendingKaraoke = karaoke;
 			return;
 		}
 
@@ -365,7 +400,115 @@ public sealed class AssSubtitleParser : ISubtitleParser
 			{
 				style.ColorHexRgba = colorHex;
 			}
+			return;
 		}
+
+		if (StartsWithTag(tag, "2c"))
+		{
+			var value = tag.Substring(2);
+			if (TryParseAssColor(value, out var colorHex))
+			{
+				style.SecondaryColorHexRgba = colorHex;
+			}
+			return;
+		}
+
+		if (StartsWithTag(tag, "3c"))
+		{
+			var value = tag.Substring(2);
+			if (TryParseAssColor(value, out var colorHex))
+			{
+				style.OutlineColorHexRgba = colorHex;
+			}
+			return;
+		}
+
+		if (StartsWithTag(tag, "1a"))
+		{
+			if (TryParseAssAlpha(tag.Substring(2), out var alpha))
+			{
+				style.ColorHexRgba = ApplyAssAlphaToRgba(style.ColorHexRgba, alpha, "#FFFFFFFF");
+			}
+			return;
+		}
+
+		if (StartsWithTag(tag, "2a"))
+		{
+			if (TryParseAssAlpha(tag.Substring(2), out var alpha))
+			{
+				style.SecondaryColorHexRgba = ApplyAssAlphaToRgba(style.SecondaryColorHexRgba, alpha, DefaultSecondaryColorHex);
+			}
+			return;
+		}
+
+		if (StartsWithTag(tag, "3a"))
+		{
+			if (TryParseAssAlpha(tag.Substring(2), out var alpha))
+			{
+				style.OutlineColorHexRgba = ApplyAssAlphaToRgba(style.OutlineColorHexRgba, alpha, "#000000FF");
+			}
+			return;
+		}
+
+		if (StartsWithTag(tag, "alpha"))
+		{
+			if (TryParseAssAlpha(tag.Substring(5), out var alpha))
+			{
+				style.ColorHexRgba = ApplyAssAlphaToRgba(style.ColorHexRgba, alpha, "#FFFFFFFF");
+				style.SecondaryColorHexRgba = ApplyAssAlphaToRgba(style.SecondaryColorHexRgba, alpha, DefaultSecondaryColorHex);
+				style.OutlineColorHexRgba = ApplyAssAlphaToRgba(style.OutlineColorHexRgba, alpha, "#000000FF");
+			}
+			return;
+		}
+
+		if (StartsWithTag(tag, "bord"))
+		{
+			var value = ExtractNumericSuffix(tag);
+			if (TryParseFloat(value, out var width))
+			{
+				style.OutlineWidth = width;
+			}
+		}
+	}
+
+	private static bool TryParseKaraokeTag(string tag, out PendingKaraoke karaoke)
+	{
+		karaoke = default;
+		KaraokeTagType tagType;
+		string value;
+
+		if (StartsWithTag(tag, "kf"))
+		{
+			tagType = KaraokeTagType.Kf;
+			value = tag.Substring(2);
+		}
+		else if (StartsWithTag(tag, "ko"))
+		{
+			tagType = KaraokeTagType.Ko;
+			value = tag.Substring(2);
+		}
+		else if (tag.StartsWith("K", StringComparison.Ordinal) && StartsWithTag(tag, "K"))
+		{
+			tagType = KaraokeTagType.Kf;
+			value = tag.Substring(1);
+		}
+		else if (StartsWithTag(tag, "k"))
+		{
+			tagType = KaraokeTagType.K;
+			value = tag.Substring(1);
+		}
+		else
+		{
+			return false;
+		}
+
+		if (!TryParseInt(ExtractNumericSuffix(value), out var centiseconds) || centiseconds <= 0)
+		{
+			return false;
+		}
+
+		karaoke = new PendingKaraoke(centiseconds, tagType);
+		return true;
 	}
 
 	private static bool StartsWithTag(string tag, string key)
@@ -415,6 +558,9 @@ public sealed class AssSubtitleParser : ISubtitleParser
 			FontName = input.FontName,
 			FontSize = input.FontSize,
 			ColorHexRgba = input.ColorHexRgba,
+			SecondaryColorHexRgba = input.SecondaryColorHexRgba,
+			OutlineColorHexRgba = input.OutlineColorHexRgba,
+			OutlineWidth = input.OutlineWidth,
 			Bold = input.Bold,
 			Italic = input.Italic,
 			Alignment = input.Alignment
@@ -426,6 +572,9 @@ public sealed class AssSubtitleParser : ISubtitleParser
 		return style.FontSize.HasValue
 			|| !string.IsNullOrWhiteSpace(style.FontName)
 			|| !string.IsNullOrWhiteSpace(style.ColorHexRgba)
+			|| !string.IsNullOrWhiteSpace(style.SecondaryColorHexRgba)
+			|| !string.IsNullOrWhiteSpace(style.OutlineColorHexRgba)
+			|| style.OutlineWidth.HasValue
 			|| style.Bold.HasValue
 			|| style.Italic.HasValue
 			|| style.Alignment.HasValue;
@@ -568,5 +717,52 @@ public sealed class AssSubtitleParser : ISubtitleParser
 
 		rgbaHex = $"#{rr:X2}{gg:X2}{bb:X2}{aa:X2}";
 		return true;
+	}
+
+	private static bool TryParseAssAlpha(string value, out byte alpha)
+	{
+		alpha = 255;
+		if (string.IsNullOrWhiteSpace(value))
+		{
+			return false;
+		}
+
+		var normalized = value.Trim().Trim('&');
+		if (normalized.StartsWith("H", StringComparison.OrdinalIgnoreCase))
+		{
+			normalized = normalized.Substring(1);
+		}
+
+		if (!byte.TryParse(normalized, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var assAlpha))
+		{
+			return false;
+		}
+
+		alpha = (byte)(255 - assAlpha);
+		return true;
+	}
+
+	private static string ApplyAssAlphaToRgba(string? rgba, byte alpha, string fallbackRgba)
+	{
+		var baseColor = string.IsNullOrWhiteSpace(rgba) ? fallbackRgba : rgba!.Trim();
+		if (!baseColor.StartsWith("#", StringComparison.Ordinal) || (baseColor.Length != 7 && baseColor.Length != 9))
+		{
+			baseColor = fallbackRgba;
+		}
+
+		var rgb = baseColor.Length >= 7 ? baseColor.Substring(1, 6) : fallbackRgba.Substring(1, 6);
+		return $"#{rgb}{alpha:X2}";
+	}
+
+	private readonly struct PendingKaraoke
+	{
+		public int DurationCentiseconds { get; }
+		public KaraokeTagType TagType { get; }
+
+		public PendingKaraoke(int durationCentiseconds, KaraokeTagType tagType)
+		{
+			DurationCentiseconds = durationCentiseconds;
+			TagType = tagType;
+		}
 	}
 }

@@ -131,6 +131,7 @@ namespace TMPro
 	{
 		public UnityEngine.Vector3 bottomLeft;
 		public UnityEngine.Vector3 topRight;
+		public float baseLine;
 		public bool isVisible;
 	}
 
@@ -145,14 +146,17 @@ namespace TMPro
 		public string text { get; set; } = string.Empty;
 		public float fontSize { get; set; }
 		public TMP_FontAsset? font { get; set; }
+		public UnityEngine.Material? fontMaterial { get; set; } = new UnityEngine.Material(UnityEngine.Shader.Find("UI/Default"));
 		public UnityEngine.Color color { get; set; }
 		public FontStyles fontStyle { get; set; }
 		public TextAlignmentOptions alignment { get; set; }
 		public bool enableWordWrapping { get; set; }
 		public TextWrappingModes textWrappingMode { get; set; }
 		public bool richText { get; set; }
+		public float preferredWidth { get; set; }
 		public TMP_TextInfo textInfo { get; } = new TMP_TextInfo();
 		public void ForceMeshUpdate() { }
+		public void UpdateMeshPadding() { }
 	}
 
 	public enum TextWrappingModes
@@ -167,6 +171,17 @@ namespace TMPro
 #pragma warning restore CA1050
 #pragma warning restore CA1707
 #pragma warning restore CA1822
+}
+
+namespace UnityEngine.UI
+{
+#pragma warning disable CA1050
+
+	public sealed class RectMask2D : UnityEngine.MonoBehaviour
+	{
+	}
+
+#pragma warning restore CA1050
 }
 
 #endif

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using HarmonyLib;
@@ -18,7 +19,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private SubtitleTrack? _track;
 	private SubtitleCue? _activeCue;
 	private MixtapeLoaderCustom? _loader;
-	private KaraokeIndicatorAdapter? _karaoke;
 	private SubtitleConfig? _config;
 	private bool _timingResolved;
 	private string _displayText = string.Empty;
@@ -40,12 +40,11 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		}
 	}
 
-	public void StartSession(MixtapeLoaderCustom loader, SubtitleTrack track, SubtitleConfig config, KaraokeIndicatorAdapter karaoke)
+	public void StartSession(MixtapeLoaderCustom loader, SubtitleTrack track, SubtitleConfig config)
 	{
 		_loader = loader;
 		_track = track;
 		_config = config;
-		_karaoke = karaoke;
 		_activeCue = null;
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
@@ -53,18 +52,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_overlay.Hide();
 		var karaokeCueCount = track.Cues.Count(c => c.KaraokeSegments.Count > 0);
 		Log.Info($"Subtitle session started with {track.Cues.Count} cue(s), {karaokeCueCount} karaoke cue(s).");
-		if (karaokeCueCount <= 0) return;
-		var mode = NormalizeKaraokeMode(config.KaraokeMode.Value);
-		if (mode is not ("auto" or "force")) return;
-		if (_karaoke is not null)
-		{
-			_karaoke.EnsureInitialized();
-			Log.Info("Karaoke indicator initialized.");
-		}
-		else
-		{
-			Log.Info("Karaoke indicator not available; skipping initialization.");
-		}
 	}
 
 	public void StopSession()
@@ -75,7 +62,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
-		_karaoke?.Hide();
 		_overlay.Hide();
 	}
 
@@ -84,7 +70,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		if (_track is null || _config is null || !_config.Enabled.Value)
 		{
 			SetDisplayText(string.Empty, null);
-			_karaoke?.Hide();
 			return;
 		}
 
@@ -99,7 +84,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		if (jukebox is null || !jukebox)
 		{
 			SetDisplayText(string.Empty, null);
-			_karaoke?.Hide();
 			return;
 		}
 
@@ -124,7 +108,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		if (cue is null)
 		{
 			SetDisplayText(string.Empty, null);
-			_karaoke?.Hide();
 			return;
 		}
 
@@ -141,31 +124,13 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		}
 
 		var hasKaraoke = cue.KaraokeSegments.Count > 0;
-		var mode = NormalizeKaraokeMode(_config.KaraokeMode.Value);
-		var karaokeRequested = mode is "auto" or "force";
-		var forceKaraoke = mode == "force";
-
-		if (!hasKaraoke || !karaokeRequested)
-		{
-			_karaoke?.Hide();
-			SetDisplayText(cue.Text, cue.Style);
-			return;
-		}
-
-		if (_karaoke?.IsAvailable == true)
-		{
-			SetDisplayText(cue.Text, cue.Style);
-			_karaoke.UpdateDisplay(cue, beat, _overlay);
-			return;
-		}
-
-		if (!forceKaraoke)
+		if (!hasKaraoke || !_config.KaraokeEnabled.Value)
 		{
 			SetDisplayText(cue.Text, cue.Style);
 			return;
 		}
 
-		SetDisplayText(BuildKaraokeFallbackText(cue, beat), cue.Style);
+		SetKaraokeDisplay(cue, beat);
 	}
 
 	private void SetDisplayText(string value, SubtitleCueStyle? style)
@@ -198,7 +163,8 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		var fontSize = style.FontSize.HasValue
 			? style.FontSize.Value.ToString(CultureInfo.InvariantCulture)
 			: string.Empty;
-		return $"{style.FontName}|{fontSize}|{style.ColorHexRgba}|{style.Bold}|{style.Italic}|{style.Alignment}";
+		return
+			$"{style.FontName}|{fontSize}|{style.ColorHexRgba}|{style.SecondaryColorHexRgba}|{style.OutlineColorHexRgba}|{style.OutlineWidth}|{style.Bold}|{style.Italic}|{style.Alignment}";
 	}
 
 	private static void ResolveCueTiming(SubtitleTrack track, JukeboxScript jukebox)
@@ -223,24 +189,222 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		track.Cues.Sort((a, b) => a.StartBeat.CompareTo(b.StartBeat));
 	}
 
-	private static string BuildKaraokeFallbackText(SubtitleCue cue, float beat)
+	private void SetKaraokeDisplay(SubtitleCue cue, float beat)
 	{
+		var segments = BuildKaraokeRenderSegments(cue, beat);
+		_overlay.SetKaraokeText(cue.Text, cue.Style, segments);
+		_displayText = "__KARAOKE_ACTIVE__";
+		_displayStyleKey = $"{BuildStyleKey(cue.Style)}|karaoke";
+	}
+
+	private static List<KaraokeRenderSegment> BuildKaraokeRenderSegments(SubtitleCue cue, float beat)
+	{
+		var result = new List<KaraokeRenderSegment>(cue.KaraokeSegments.Count + 2);
 		if (cue.KaraokeSegments.Count == 0)
 		{
-			return cue.Text;
+			result.Add(new KaraokeRenderSegment
+			{
+				StartCharIndex = 0,
+				CharLength = cue.Text.Length,
+				Text = cue.Text
+			});
+			return result;
 		}
 
-		var activeIndex = 0;
+		var primaryColor = EnsureRgba(cue.Style?.ColorHexRgba, "#FFFFFFFF");
+		var secondaryColor = EnsureRgba(cue.Style?.SecondaryColorHexRgba, "#FFFF00FF");
+		var outlineColor = EnsureRgba(cue.Style?.OutlineColorHexRgba, "#000000FF");
+		var hiddenOutlineColor = WithAlpha(outlineColor, 0f);
+		var textCursor = 0;
 		for (var i = 0; i < cue.KaraokeSegments.Count; i++)
 		{
-			var markerBeat = cue.KaraokeSegments[i].Beat ?? cue.StartBeat;
-			if (beat >= markerBeat)
+			var segment = cue.KaraokeSegments[i];
+			if (string.IsNullOrEmpty(segment.Text))
 			{
-				activeIndex = i;
+				continue;
+			}
+
+			if (!TryResolveSegmentRange(cue, segment, textCursor, out var startIndex, out var length))
+			{
+				continue;
+			}
+
+			if (startIndex > textCursor)
+			{
+				result.Add(new KaraokeRenderSegment
+				{
+					StartCharIndex = textCursor,
+					CharLength = startIndex - textCursor,
+					Text = cue.Text.Substring(textCursor, startIndex - textCursor),
+					BaseFaceColorHexRgba = primaryColor,
+					FillFaceColorHexRgba = primaryColor,
+					OutlineColorHexRgba = outlineColor,
+					FillProgress = 1f
+				});
+			}
+
+			var startBeat = segment.Beat ?? cue.StartBeat;
+			var endBeat = i + 1 < cue.KaraokeSegments.Count
+				? cue.KaraokeSegments[i + 1].Beat ?? cue.EndBeat
+				: cue.EndBeat;
+			var duration = Mathf.Max(endBeat - startBeat, 0.001f);
+			var phase = Mathf.Clamp01((beat - startBeat) / duration);
+			var segmentText = cue.Text.Substring(startIndex, length);
+			AddRenderedSegment(
+				result,
+				startIndex,
+				segmentText,
+				segment.TagType,
+				beat,
+				startBeat,
+				endBeat,
+				phase,
+				primaryColor,
+				secondaryColor,
+				outlineColor,
+				hiddenOutlineColor);
+			textCursor = startIndex + length;
+		}
+
+		if (textCursor < cue.Text.Length)
+		{
+			result.Add(new KaraokeRenderSegment
+			{
+				StartCharIndex = textCursor,
+				CharLength = cue.Text.Length - textCursor,
+				Text = cue.Text.Substring(textCursor),
+				BaseFaceColorHexRgba = primaryColor,
+				FillFaceColorHexRgba = primaryColor,
+				OutlineColorHexRgba = outlineColor,
+				FillProgress = 1f
+			});
+		}
+
+		return result;
+	}
+
+	private static void AddRenderedSegment(
+		List<KaraokeRenderSegment> target,
+		int startCharIndex,
+		string text,
+		KaraokeTagType tagType,
+		float beat,
+		float startBeat,
+		float endBeat,
+		float phase,
+		string primaryColor,
+		string secondaryColor,
+		string outlineColor,
+		string hiddenOutlineColor)
+	{
+		if (string.IsNullOrEmpty(text))
+		{
+			return;
+		}
+
+		if (beat < startBeat)
+		{
+			var preOutline = tagType == KaraokeTagType.Ko ? hiddenOutlineColor : outlineColor;
+			target.Add(new KaraokeRenderSegment
+			{
+				StartCharIndex = startCharIndex,
+				CharLength = text.Length,
+				Text = text,
+				BaseFaceColorHexRgba = secondaryColor,
+				FillFaceColorHexRgba = secondaryColor,
+				OutlineColorHexRgba = preOutline,
+				FillProgress = 1f
+			});
+			return;
+		}
+
+		if (beat >= endBeat)
+		{
+			target.Add(new KaraokeRenderSegment
+			{
+				StartCharIndex = startCharIndex,
+				CharLength = text.Length,
+				Text = text,
+				BaseFaceColorHexRgba = primaryColor,
+				FillFaceColorHexRgba = primaryColor,
+				OutlineColorHexRgba = outlineColor,
+				FillProgress = 1f
+			});
+			return;
+		}
+
+		if (tagType == KaraokeTagType.Kf)
+		{
+			target.Add(new KaraokeRenderSegment
+			{
+				StartCharIndex = startCharIndex,
+				CharLength = text.Length,
+				Text = text,
+				BaseFaceColorHexRgba = secondaryColor,
+				FillFaceColorHexRgba = primaryColor,
+				OutlineColorHexRgba = outlineColor,
+				FillProgress = Mathf.Clamp01(phase)
+			});
+			return;
+		}
+
+		target.Add(new KaraokeRenderSegment
+		{
+			StartCharIndex = startCharIndex,
+			CharLength = text.Length,
+			Text = text,
+			BaseFaceColorHexRgba = primaryColor,
+			FillFaceColorHexRgba = primaryColor,
+			OutlineColorHexRgba = outlineColor,
+			FillProgress = 1f
+		});
+	}
+
+	private static bool TryResolveSegmentRange(SubtitleCue cue, KaraokeSegment segment, int searchFrom, out int startIndex, out int length)
+	{
+		startIndex = -1;
+		length = 0;
+		if (segment.StartCharIndex.HasValue && segment.CharLength.HasValue)
+		{
+			startIndex = segment.StartCharIndex.Value;
+			length = Math.Min(segment.CharLength.Value, Math.Max(0, cue.Text.Length - startIndex));
+			return startIndex >= 0 && length > 0 && startIndex + length <= cue.Text.Length;
+		}
+
+		startIndex = cue.Text.IndexOf(segment.Text, searchFrom, StringComparison.Ordinal);
+		if (startIndex < 0)
+		{
+			return false;
+		}
+
+		length = segment.Text.Length;
+		return length > 0;
+	}
+
+	private static string EnsureRgba(string? rgba, string fallback)
+	{
+		if (!string.IsNullOrWhiteSpace(rgba) && rgba!.StartsWith("#", StringComparison.Ordinal))
+		{
+			if (rgba.Length == 7)
+			{
+				return $"{rgba}FF";
+			}
+
+			if (rgba.Length == 9)
+			{
+				return rgba;
 			}
 		}
 
-		return $"{cue.Text}\n< {cue.KaraokeSegments[activeIndex].Text} >";
+		return fallback;
+	}
+
+	private static string WithAlpha(string rgba, float alpha)
+	{
+		var value = EnsureRgba(rgba, "#FFFFFFFF");
+		var rgb = value.Substring(0, 7);
+		var a = Mathf.Clamp(Mathf.RoundToInt(alpha * 255f), 0, 255);
+		return $"{rgb}{a:X2}";
 	}
 
 	private static string Truncate(string value, int max)
@@ -253,18 +417,4 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		return value.Substring(0, max) + "...";
 	}
 
-	private static string NormalizeKaraokeMode(string? configuredValue)
-	{
-		string mode = (configuredValue ?? string.Empty).Trim().ToLowerInvariant();
-		if (mode is "off" or "auto" or "force")
-		{
-			return mode;
-		}
-
-		if (!string.IsNullOrWhiteSpace(configuredValue))
-		{
-			Log.Warn($"Unknown KaraokeMode '{configuredValue}'. Using Auto.");
-		}
-		return "auto";
-	}
 }

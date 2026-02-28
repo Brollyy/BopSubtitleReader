@@ -102,23 +102,6 @@ Language resolution order:
 3. `en` (if `FallbackToEnglish=true`)
 4. `defaultLanguage` from subtitle catalog (if `FallbackToDefaultTrack=true`)
 
-## Karaoke / Meet & Tweet feasibility notes
-
-Game metadata inspection confirms Meet & Tweet chart templates include:
-
-- `meetAndTweet/set lyrics`
-- `meetAndTweetSky/set lyrics`
-
-and `MeetAndTweetScript` contains `lyrics` / `lyrics2` sprite renderers.
-
-In this mod:
-
-- `KaraokeMode=Auto` attempts to reuse in-game karaoke-like indicator paths when discoverable at runtime.
-- If unavailable, subtitles still render via overlay fallback.
-- The custom karaoke ball indicator uses bundled sprite asset `assets/karaoke_bop.png`.
-
-Subtitle rendering uses a TextMeshPro-based overlay (`TextMeshProUGUI`) so styling/alignment follows the game's TMP-centric UI stack.
-
 ## Config
 
 `[Subtitles]`
@@ -128,7 +111,7 @@ Subtitle rendering uses a TextMeshPro-based overlay (`TextMeshProUGUI`) so styli
 - `UseGameLanguage=true`
 - `FallbackToEnglish=true`
 - `FallbackToDefaultTrack=true`
-- `KaraokeMode=Auto` (`Off`, `Auto`, `Force`)
+- `KaraokeEnabled=true`
 - `TimelineReferenceBpm=120`
 
 ## Contributing
