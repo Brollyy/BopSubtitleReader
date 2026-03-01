@@ -57,7 +57,7 @@ jobs:
             +quit
 
           echo "Game DLLs downloaded successfully"
-          ls -la "$GAME_DIR/Bits & Bops_Data/Managed/" | head -n 20
+          ls -la "$GAME_DIR/Bits & Bops_Data/Managed/"
 
       - name: Upload game DLLs as artifact
         uses: actions/upload-artifact@v4
