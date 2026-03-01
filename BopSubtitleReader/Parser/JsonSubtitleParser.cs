@@ -79,7 +79,7 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 		}
 		catch (Exception ex)
 		{
-			Log.Error($"Failed to parse subtitle json from '{asset.Source}': {ex.Message}");
+			Log.Error($"Failed to parse subtitle json from '{asset.Source}': [{ex.GetType().Name}] {ex.Message}{Environment.NewLine}{ex}");
 			return false;
 		}
 	}
