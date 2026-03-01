@@ -22,12 +22,17 @@ jobs:
           restore-keys: bits-and-bops-managed-
 
       - name: Download game DLLs using SteamCMD
-        if: steps.cache.outputs.cache-hit != 'true'
         env:
           STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
           STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
         run: |
           set -euo pipefail
+
+          # Skip download if DLLs are already cached
+          if [ -d "$HOME/bits-and-bops/Bits & Bops_Data/Managed" ] && [ -n "$(ls -A "$HOME/bits-and-bops/Bits & Bops_Data/Managed" 2>/dev/null)" ]; then
+            echo "Game DLLs found in cache, skipping download"
+            exit 0
+          fi
 
           if [ -z "$STEAM_USERNAME" ] || [ -z "$STEAM_PASSWORD" ]; then
             echo "Error: STEAM_USERNAME and STEAM_PASSWORD secrets are not set"
@@ -57,7 +62,8 @@ jobs:
             +quit
 
           echo "Game DLLs downloaded successfully"
-          ls -la "$GAME_DIR/Bits & Bops_Data/Managed/"
+          ls "$GAME_DIR/Bits & Bops_Data/Managed/" | wc -l
+          echo "DLLs found in managed directory"
 
       - name: Upload game DLLs as artifact
         uses: actions/upload-artifact@v4
