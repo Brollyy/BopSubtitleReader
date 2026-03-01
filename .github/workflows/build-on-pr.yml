@@ -37,7 +37,7 @@ jobs:
       - name: Create BopSubtitleReader.user.props
         run: |
           mkdir -p BopSubtitleReader
-          cat > BopSubtitleReader/BopSubtitleReader.user.props << 'EOF'
+          cat > BopSubtitleReader/BopSubtitleReader.user.props << EOF
           <Project>
             <PropertyGroup>
               <GameRoot>$HOME/bits-and-bops</GameRoot>
