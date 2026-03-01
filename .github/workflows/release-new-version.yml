@@ -62,7 +62,7 @@ jobs:
           git add BopSubtitleReader/BopSubtitleReader.csproj
           if git diff --cached --quiet; then
             echo "No version change detected." >&2
-            exit 1
+            exit 0
           fi
 
           git commit -m "chore: bump version to v${VERSION}"
