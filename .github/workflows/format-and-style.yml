@@ -6,6 +6,12 @@ on:
   merge_group:
 
 jobs:
+  setup-game-dlls:
+    uses: ./.github/workflows/setup-game-dlls.yml
+    secrets:
+      STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+      STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+
   whitespace-format:
     runs-on: ubuntu-latest
 
@@ -43,6 +49,7 @@ jobs:
         run: dotnet format style BopSubtitleReader.sln --no-restore --verify-no-changes --verbosity minimal --exclude BopSubtitleReader/obj
 
   analyzers:
+    needs: setup-game-dlls
     runs-on: ubuntu-latest
 
     steps:
@@ -53,6 +60,23 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
+
+      - name: Download game DLLs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: game-dlls
+          path: ~/bits-and-bops/Bits & Bops_Data/Managed
+
+      - name: Create BopSubtitleReader.user.props
+        run: |
+          mkdir -p BopSubtitleReader
+          cat > BopSubtitleReader/BopSubtitleReader.user.props << EOF
+          <Project>
+            <PropertyGroup>
+              <GameRoot>$HOME/bits-and-bops</GameRoot>
+            </PropertyGroup>
+          </Project>
+          EOF
 
       - name: Restore
         run: dotnet restore BopSubtitleReader.sln -p:SkipGameReferences=true

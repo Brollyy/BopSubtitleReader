@@ -38,7 +38,6 @@
     <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all"/>
     <PackageReference Include="BepInEx.Core" Version="5.*"/>
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*"/>
-    <PackageReference Include="System.Text.Json" Version="8.*"/>
     <PackageReference Include="UnityEngine.Modules" Version="2021.3.33" IncludeAssets="compile"/>
     <Reference Include="UnityEngine" Condition="Exists('$(UnityManagedDir)/UnityEngine.dll')">
       <HintPath>$(UnityManagedDir)/UnityEngine.dll</HintPath>

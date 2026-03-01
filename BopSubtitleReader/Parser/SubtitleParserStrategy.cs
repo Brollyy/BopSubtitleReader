@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using BopSubtitleReader.Core;
@@ -19,9 +20,16 @@ public sealed class SubtitleParserStrategy
 	{
 		foreach (var parser in _parsers.Where(parser => parser.CanParse(asset)))
 		{
-			if (parser.TryParse(asset, out catalog))
+			try
 			{
-				return true;
+				if (parser.TryParse(asset, out catalog))
+				{
+					return true;
+				}
+			}
+			catch (Exception ex)
+			{
+				Log.Error($"Parser '{parser.Name}' threw an unexpected exception for '{asset.Source}': [{ex.GetType().Name}] {ex.Message}{Environment.NewLine}{ex}");
 			}
 		}
 
