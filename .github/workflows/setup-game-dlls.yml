@@ -11,7 +11,7 @@ on:
 jobs:
   download-dlls:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Restore game DLLs from cache
         id: cache
@@ -28,7 +28,7 @@ jobs:
           STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
         run: |
           set -euo pipefail
-          
+
           if [ -z "$STEAM_USERNAME" ] || [ -z "$STEAM_PASSWORD" ]; then
             echo "Error: STEAM_USERNAME and STEAM_PASSWORD secrets are not set"
             echo "Configure Steam credentials in repository secrets:"
@@ -39,15 +39,15 @@ jobs:
             echo "SteamCMD cannot handle 2FA in automated environments."
             exit 1
           fi
-          
+
           # Install SteamCMD
           mkdir -p ~/steamcmd
           cd ~/steamcmd
           curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf -
-          
+
           GAME_DIR="$HOME/bits-and-bops"
           mkdir -p "$GAME_DIR"
-          
+
           # Download Bits & Bops (App ID: 1929290)
           # NOTE: This will FAIL if the Steam account has 2FA/Steam Guard enabled
           echo "Downloading Bits & Bops from Steam..."
@@ -55,9 +55,9 @@ jobs:
             +login "$STEAM_USERNAME" "$STEAM_PASSWORD" \
             +app_update 1929290 validate \
             +quit
-          
+
           echo "Game DLLs downloaded successfully"
-          ls -la "$GAME_DIR/Bits & Bops_Data/Managed/" | head -20
+          ls -la "$GAME_DIR/Bits & Bops_Data/Managed/" | head -n 20
 
       - name: Upload game DLLs as artifact
         uses: actions/upload-artifact@v4
