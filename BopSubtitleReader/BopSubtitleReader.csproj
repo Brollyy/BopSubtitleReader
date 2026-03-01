@@ -27,8 +27,6 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <SkipGameReferences Condition="'$(SkipGameReferences)' == '' and '$(GITHUB_ACTIONS)' == 'true'">true</SkipGameReferences>
-    <DefineConstants Condition="'$(SkipGameReferences)' == 'true'">$(DefineConstants);SKIP_GAME_REFERENCES</DefineConstants>
     <GameRoot Condition="'$(GameRoot)' == '' and '$(BOP_GAME_ROOT)' != ''">$(BOP_GAME_ROOT)</GameRoot>
     <BepInExRoot Condition="'$(GameRoot)' != ''">$(GameRoot)/BepInEx</BepInExRoot>
     <BepInExPluginsDir Condition="'$(GameRoot)' != ''">$(GameRoot)/BepInEx/plugins</BepInExPluginsDir>
@@ -42,19 +40,19 @@
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*"/>
     <PackageReference Include="System.Text.Json" Version="8.*"/>
     <PackageReference Include="UnityEngine.Modules" Version="2021.3.33" IncludeAssets="compile"/>
-    <Reference Include="UnityEngine" Condition="'$(SkipGameReferences)' != 'true' and Exists('$(UnityManagedDir)/UnityEngine.dll')">
+    <Reference Include="UnityEngine" Condition="Exists('$(UnityManagedDir)/UnityEngine.dll')">
       <HintPath>$(UnityManagedDir)/UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="UnityEngine.CoreModule" Condition="'$(SkipGameReferences)' != 'true' and Exists('$(UnityManagedDir)/UnityEngine.CoreModule.dll')">
+    <Reference Include="UnityEngine.CoreModule" Condition="Exists('$(UnityManagedDir)/UnityEngine.CoreModule.dll')">
       <HintPath>$(UnityManagedDir)/UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="UnityEngine.ImageConversionModule" Condition="'$(SkipGameReferences)' != 'true' and Exists('$(UnityManagedDir)/UnityEngine.ImageConversionModule.dll')">
+    <Reference Include="UnityEngine.ImageConversionModule" Condition="Exists('$(UnityManagedDir)/UnityEngine.ImageConversionModule.dll')">
       <HintPath>$(UnityManagedDir)/UnityEngine.ImageConversionModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="@(GameLibrary)" Condition="'$(SkipGameReferences)' != 'true' and '$(UnityManagedDir)' != ''">
+    <Reference Include="@(GameLibrary)" Condition="'$(UnityManagedDir)' != ''">
       <HintPath>$(UnityManagedDir)/%(Identity).dll</HintPath>
       <Private>false</Private>
     </Reference>
@@ -65,7 +63,7 @@
     <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
 
-  <Target Name="ValidateTemplateDependencies" BeforeTargets="ResolveReferences" Condition="'$(SkipGameReferences)' != 'true'">
+  <Target Name="ValidateTemplateDependencies" BeforeTargets="ResolveReferences">
     <ItemGroup>
       <MissingGameLibrary Include="@(GameLibrary)"
                           Condition="'$(UnityManagedDir)' != '' and !Exists('$(UnityManagedDir)/%(Identity).dll')"/>
@@ -79,7 +77,7 @@
 
   <Target Name="CopyPluginToBepInEx"
           AfterTargets="PostBuildEvent"
-          Condition="'$(SkipGameReferences)' != 'true' and '$(BepInExPluginsDir)' != '' and Exists('$(BepInExPluginsDir)')">
+          Condition="'$(BepInExPluginsDir)' != '' and Exists('$(BepInExPluginsDir)')">
     <ItemGroup>
       <PluginRuntimePayload Include="$(TargetPath)"/>
     </ItemGroup>
