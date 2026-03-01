@@ -48,12 +48,12 @@ jobs:
           GAME_DIR="$HOME/bits-and-bops"
           mkdir -p "$GAME_DIR"
           
-          # Download Bits & Bops (App ID: 2174920)
+          # Download Bits & Bops (App ID: 1929290)
           # NOTE: This will FAIL if the Steam account has 2FA/Steam Guard enabled
           echo "Downloading Bits & Bops from Steam..."
           ./steamcmd.sh +force_install_dir "$GAME_DIR" \
             +login "$STEAM_USERNAME" "$STEAM_PASSWORD" \
-            +app_update 2174920 validate \
+            +app_update 1929290 validate \
             +quit
           
           echo "Game DLLs downloaded successfully"
