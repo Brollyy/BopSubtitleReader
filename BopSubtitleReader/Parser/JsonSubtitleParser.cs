@@ -50,6 +50,7 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 				{
 					if (trackProperty.Value is not JArray trackArray)
 					{
+						Log.Warn($"Track '{trackProperty.Name}' in '{asset.Source}' is not an array and will be skipped.");
 						continue;
 					}
 
