@@ -1,5 +1,5 @@
 using System;
-using System.Text.Json;
+using Newtonsoft.Json.Linq;
 using BopSubtitleReader.Core;
 
 namespace BopSubtitleReader.Parser;
@@ -21,49 +21,53 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 
 		try
 		{
-			using var document = JsonDocument.Parse(asset.Content);
-			var root = document.RootElement;
+			var root = JToken.Parse(asset.Content);
 
-			if (root.ValueKind == JsonValueKind.Array)
+			if (root is JArray rootArray)
 			{
-				var track = ParseSingleTrack(root, asset.LanguageHint, asset.Source);
+				var track = ParseSingleTrack(rootArray, asset.LanguageHint, asset.Source);
 				catalog.AddOrMerge(track);
 				return true;
 			}
 
-			if (root.ValueKind != JsonValueKind.Object)
+			if (root is not JObject rootObject)
 			{
 				Log.Warn($"Unsupported subtitle JSON root in '{asset.Source}'.");
 				return false;
 			}
 
-			if (root.TryGetProperty("defaultLanguage", out var defaultLanguageElement)
-				&& defaultLanguageElement.ValueKind == JsonValueKind.String)
+			if (rootObject.TryGetValue("defaultLanguage", out var defaultLanguageToken)
+				&& defaultLanguageToken.Type == JTokenType.String)
 			{
-				catalog.DefaultLanguage = LanguageResolver.Normalize(defaultLanguageElement.GetString() ?? "en");
+				catalog.DefaultLanguage = LanguageResolver.Normalize(defaultLanguageToken.Value<string>() ?? "en");
 			}
 
-			if (root.TryGetProperty("tracks", out var tracksElement)
-				&& tracksElement.ValueKind == JsonValueKind.Object)
+			if (rootObject.TryGetValue("tracks", out var tracksToken)
+				&& tracksToken is JObject tracksObject)
 			{
-				foreach (var trackProperty in tracksElement.EnumerateObject())
+				foreach (var trackProperty in tracksObject.Properties())
 				{
-					var parsedTrack = ParseSingleTrack(trackProperty.Value, trackProperty.Name, asset.Source);
+					if (trackProperty.Value is not JArray trackArray)
+					{
+						continue;
+					}
+
+					var parsedTrack = ParseSingleTrack(trackArray, trackProperty.Name, asset.Source);
 					catalog.AddOrMerge(parsedTrack);
 				}
 
 				return catalog.Tracks.Count > 0;
 			}
 
-			if (root.TryGetProperty("cues", out var cuesElement) && cuesElement.ValueKind == JsonValueKind.Array)
+			if (rootObject.TryGetValue("cues", out var cuesToken) && cuesToken is JArray cuesArray)
 			{
 				var language = asset.LanguageHint;
-				if (root.TryGetProperty("language", out var languageElement) && languageElement.ValueKind == JsonValueKind.String)
+				if (rootObject.TryGetValue("language", out var languageToken) && languageToken.Type == JTokenType.String)
 				{
-					language = languageElement.GetString() ?? language;
+					language = languageToken.Value<string>() ?? language;
 				}
 
-				var singleTrack = ParseSingleTrack(cuesElement, language, asset.Source);
+				var singleTrack = ParseSingleTrack(cuesArray, language, asset.Source);
 				catalog.AddOrMerge(singleTrack);
 				return true;
 			}
@@ -78,7 +82,7 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 		}
 	}
 
-	private static SubtitleTrack ParseSingleTrack(JsonElement cuesElement, string language, string source)
+	private static SubtitleTrack ParseSingleTrack(JArray cuesArray, string language, string source)
 	{
 		var track = new SubtitleTrack
 		{
@@ -86,22 +90,22 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 			Source = source
 		};
 
-		foreach (var cueElement in cuesElement.EnumerateArray())
+		foreach (var cueToken in cuesArray)
 		{
-			if (cueElement.ValueKind != JsonValueKind.Object)
+			if (cueToken is not JObject cueObject)
 			{
 				continue;
 			}
 
 			var cue = new SubtitleCue
 			{
-				Text = cueElement.TryGetProperty("text", out var textElement) ? textElement.GetString() ?? string.Empty : string.Empty
+				Text = cueObject.TryGetValue("text", out var textToken) ? textToken.Value<string>() ?? string.Empty : string.Empty
 			};
 
-			var hasStartBeat = cueElement.TryGetProperty("startBeat", out var startBeatElement);
-			var hasEndBeat = cueElement.TryGetProperty("endBeat", out var endBeatElement);
-			var hasStartSeconds = cueElement.TryGetProperty("startSeconds", out var startSecondsElement);
-			var hasEndSeconds = cueElement.TryGetProperty("endSeconds", out var endSecondsElement);
+			var hasStartBeat = cueObject.TryGetValue("startBeat", out var startBeatToken);
+			var hasEndBeat = cueObject.TryGetValue("endBeat", out var endBeatToken);
+			var hasStartSeconds = cueObject.TryGetValue("startSeconds", out var startSecondsToken);
+			var hasEndSeconds = cueObject.TryGetValue("endSeconds", out var endSecondsToken);
 			var hasBeatTiming = hasStartBeat && hasEndBeat;
 			var hasSecondTiming = hasStartSeconds && hasEndSeconds;
 
@@ -112,27 +116,27 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 
 			if (hasSecondTiming)
 			{
-				cue.StartSeconds = ReadDouble(startSecondsElement);
-				cue.EndSeconds = ReadDouble(endSecondsElement);
+				cue.StartSeconds = ReadDouble(startSecondsToken);
+				cue.EndSeconds = ReadDouble(endSecondsToken);
 			}
 			else
 			{
-				cue.StartBeat = ReadFloat(startBeatElement);
-				cue.EndBeat = ReadFloat(endBeatElement);
+				cue.StartBeat = ReadFloat(startBeatToken);
+				cue.EndBeat = ReadFloat(endBeatToken);
 			}
 
-			if (cueElement.TryGetProperty("karaoke", out var karaokeElement)
-				&& karaokeElement.ValueKind == JsonValueKind.Array)
+			if (cueObject.TryGetValue("karaoke", out var karaokeToken)
+				&& karaokeToken is JArray karaokeArray)
 			{
-				foreach (var segmentElement in karaokeElement.EnumerateArray())
+				foreach (var segmentToken in karaokeArray)
 				{
-					if (segmentElement.ValueKind != JsonValueKind.Object)
+					if (segmentToken is not JObject segmentObject)
 					{
 						continue;
 					}
 
-					var hasBeat = segmentElement.TryGetProperty("beat", out var beatElement);
-					var hasSeconds = segmentElement.TryGetProperty("seconds", out var secondsElement);
+					var hasBeat = segmentObject.TryGetValue("beat", out var beatToken);
+					var hasSeconds = segmentObject.TryGetValue("seconds", out var secondsToken);
 					if (!hasBeat && !hasSeconds)
 					{
 						continue;
@@ -140,10 +144,10 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 
 					cue.KaraokeSegments.Add(new KaraokeSegment
 					{
-						Beat = hasBeat ? ReadFloat(beatElement) : null,
-						Seconds = hasSeconds ? ReadDouble(secondsElement) : null,
-						Text = segmentElement.TryGetProperty("text", out var segmentTextElement)
-							? segmentTextElement.GetString() ?? string.Empty
+						Beat = hasBeat ? ReadFloat(beatToken) : null,
+						Seconds = hasSeconds ? ReadDouble(secondsToken) : null,
+						Text = segmentObject.TryGetValue("text", out var segmentTextToken)
+							? segmentTextToken.Value<string>() ?? string.Empty
 							: string.Empty
 					});
 				}
@@ -163,22 +167,32 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 		return track;
 	}
 
-	private static float ReadFloat(JsonElement element)
+	private static float ReadFloat(JToken? token)
 	{
-		return element.ValueKind switch
+		if (token is null)
 		{
-			JsonValueKind.Number => element.GetSingle(),
-			JsonValueKind.String when float.TryParse(element.GetString(), out var parsed) => parsed,
+			return 0f;
+		}
+
+		return token.Type switch
+		{
+			JTokenType.Float or JTokenType.Integer => token.Value<float>(),
+			JTokenType.String when float.TryParse(token.Value<string>(), out var parsed) => parsed,
 			_ => 0f
 		};
 	}
 
-	private static double ReadDouble(JsonElement element)
+	private static double ReadDouble(JToken? token)
 	{
-		return element.ValueKind switch
+		if (token is null)
 		{
-			JsonValueKind.Number => element.GetDouble(),
-			JsonValueKind.String when double.TryParse(element.GetString(), out var parsed) => parsed,
+			return 0d;
+		}
+
+		return token.Type switch
+		{
+			JTokenType.Float or JTokenType.Integer => token.Value<double>(),
+			JTokenType.String when double.TryParse(token.Value<string>(), out var parsed) => parsed,
 			_ => 0d
 		};
 	}
