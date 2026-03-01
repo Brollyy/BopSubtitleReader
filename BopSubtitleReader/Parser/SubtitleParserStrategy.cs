@@ -29,7 +29,7 @@ public sealed class SubtitleParserStrategy
 			}
 			catch (Exception ex)
 			{
-				Log.Error($"Parser '{parser.Name}' threw an unexpected exception for '{asset.Source}': [{ex.GetType().Name}] {ex.Message}");
+				Log.Error($"Parser '{parser.Name}' threw an unexpected exception for '{asset.Source}': [{ex.GetType().Name}] {ex.Message}{Environment.NewLine}{ex}");
 			}
 		}
 

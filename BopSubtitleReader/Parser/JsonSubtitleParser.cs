@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using Newtonsoft.Json.Linq;
 using BopSubtitleReader.Core;
 
@@ -177,7 +178,7 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 		return token.Type switch
 		{
 			JTokenType.Float or JTokenType.Integer => token.Value<float>(),
-			JTokenType.String when float.TryParse(token.Value<string>(), out var parsed) => parsed,
+			JTokenType.String when float.TryParse(token.Value<string>(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
 			_ => 0f
 		};
 	}
@@ -192,7 +193,7 @@ public sealed class JsonSubtitleParser : ISubtitleParser
 		return token.Type switch
 		{
 			JTokenType.Float or JTokenType.Integer => token.Value<double>(),
-			JTokenType.String when double.TryParse(token.Value<string>(), out var parsed) => parsed,
+			JTokenType.String when double.TryParse(token.Value<string>(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
 			_ => 0d
 		};
 	}
