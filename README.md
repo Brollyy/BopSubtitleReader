@@ -2,6 +2,13 @@
 
 BepInEx 5.x mod for Bits & Bops that adds chart subtitles loaded from `.bop` / `.riq` archives (or extracted chart folders).
 
+## Installation
+
+1. Install **BepInEx 5.x** by following the [BepInEx installation guide](https://docs.bepinex.dev/articles/user_guide/installation/index.html).
+2. Download `BopSubtitleReader.dll` from the [latest release](https://github.com/Brollyy/BopSubtitleReader/releases/latest).
+3. Place `BopSubtitleReader.dll` in `<GameRoot>/BepInEx/plugins/`.
+4. Launch the game.
+
 ## Adding subtitles
 
 Add one or more files inside your chart archive/folder:
