@@ -30,6 +30,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private MixtapeLoaderCustom? _loader;
 	private SubtitleConfig? _config;
 	private bool _timingResolved;
+	private float _resolvedPlaybackRate = 1f;
 	private string _displayText = string.Empty;
 	private string _displayStyleKey = string.Empty;
 
@@ -67,6 +68,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
+		_resolvedPlaybackRate = 1f;
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
 		_cachedKaraokeBeat = float.NaN;
@@ -86,6 +88,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
+		_resolvedPlaybackRate = 1f;
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
 		_cachedKaraokeBeat = float.NaN;
@@ -118,10 +121,15 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		RefreshSubtitleCamera();
 
-		if (!_timingResolved)
+		var playbackRate = GetJukeboxPlaybackRate(jukebox);
+		if (!_timingResolved || !Mathf.Approximately(playbackRate, _resolvedPlaybackRate))
 		{
-			ResolveCueTiming(_track, jukebox);
+			ResolveCueTiming(_track, jukebox, playbackRate);
+			_resolvedPlaybackRate = playbackRate;
 			_timingResolved = true;
+			_activeCue = null;
+			_cachedKaraokeCue = null;
+			_cachedActiveSegmentIndex = -1;
 		}
 
 		var beat = jukebox.CurrentBeat;
@@ -250,9 +258,8 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			$"{style.FontName}|{fontSize}|{style.ColorHexRgba}|{style.SecondaryColorHexRgba}|{style.OutlineColorHexRgba}|{style.OutlineWidth}|{style.Bold}|{style.Italic}|{style.Alignment}";
 	}
 
-	private static void ResolveCueTiming(SubtitleTrack track, JukeboxScript jukebox)
+	private static void ResolveCueTiming(SubtitleTrack track, JukeboxScript jukebox, float playbackRate)
 	{
-		var playbackRate = GetJukeboxPlaybackRate(jukebox);
 		foreach (var cue in track.Cues)
 		{
 			if (cue.UsesSecondsTiming && cue is { StartSeconds: not null, EndSeconds: not null })
