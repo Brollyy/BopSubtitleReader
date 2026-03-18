@@ -252,24 +252,36 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 	private static void ResolveCueTiming(SubtitleTrack track, JukeboxScript jukebox)
 	{
+		var playbackRate = GetJukeboxPlaybackRate(jukebox);
 		foreach (var cue in track.Cues)
 		{
 			if (cue.UsesSecondsTiming && cue is { StartSeconds: not null, EndSeconds: not null })
 			{
-				cue.StartBeat = jukebox.SecondsToBeats(cue.StartSeconds.Value);
-				cue.EndBeat = jukebox.SecondsToBeats(cue.EndSeconds.Value);
+				cue.StartBeat = jukebox.SecondsToBeats(cue.StartSeconds.Value / playbackRate);
+				cue.EndBeat = jukebox.SecondsToBeats(cue.EndSeconds.Value / playbackRate);
 			}
 
 			foreach (var segment in cue.KaraokeSegments)
 			{
-				if (!segment.Beat.HasValue && segment.Seconds.HasValue)
+				if (segment.Seconds.HasValue)
 				{
-					segment.Beat = jukebox.SecondsToBeats(segment.Seconds.Value);
+					segment.Beat = jukebox.SecondsToBeats(segment.Seconds.Value / playbackRate);
 				}
 			}
 		}
 
 		track.Cues.Sort((a, b) => a.StartBeat.CompareTo(b.StartBeat));
+	}
+
+	private static float GetJukeboxPlaybackRate(JukeboxScript jukebox)
+	{
+		var audioSource = jukebox.GetComponent<AudioSource>();
+		if (!audioSource)
+		{
+			return 1f;
+		}
+
+		return Mathf.Max(Mathf.Abs(audioSource.pitch), 0.01f);
 	}
 
 	private void RefreshSubtitleCamera(bool force = false)
