@@ -38,9 +38,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private SubtitleCue? _cachedKaraokeCue;
 	private int _cachedActiveSegmentIndex = -1;
 	private float _cachedKaraokeBeat = float.NaN;
-	private Camera? _cachedSubtitleCamera;
-	private float _nextCameraResolveTime;
-	private const float CameraResolveIntervalSeconds = 0.5f;
 	public bool HasActiveSession => _track is not null && _loader is not null && _config is not null;
 
 	public static SubtitleRuntimeController Instance
@@ -70,9 +67,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
 		_cachedKaraokeBeat = float.NaN;
-		_cachedSubtitleCamera = null;
-		_nextCameraResolveTime = 0f;
-		RefreshSubtitleCamera(force: true);
 		_overlay.Hide();
 		var karaokeCueCount = track.Cues.Count(c => c.KaraokeSegments.Count > 0);
 		Log.Info($"Subtitle session started with {track.Cues.Count} cue(s), {karaokeCueCount} karaoke cue(s).");
@@ -89,8 +83,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
 		_cachedKaraokeBeat = float.NaN;
-		_cachedSubtitleCamera = null;
-		_nextCameraResolveTime = 0f;
 		_overlay.Hide();
 	}
 
@@ -115,8 +107,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			SetDisplayText(string.Empty, null);
 			return;
 		}
-
-		RefreshSubtitleCamera();
 
 		if (!_timingResolved)
 		{
@@ -270,33 +260,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		}
 
 		track.Cues.Sort((a, b) => a.StartBeat.CompareTo(b.StartBeat));
-	}
-
-	private void RefreshSubtitleCamera(bool force = false)
-	{
-		if (_loader is null || !_loader)
-		{
-			return;
-		}
-
-		var shouldResolve = force
-			|| Time.unscaledTime >= _nextCameraResolveTime
-			|| _cachedSubtitleCamera is null
-			|| !_cachedSubtitleCamera
-			|| !_cachedSubtitleCamera.enabled;
-		if (!shouldResolve)
-		{
-			return;
-		}
-
-		var resolvedCamera = ResolveSubtitleCamera(_loader);
-		if (force || !ReferenceEquals(_cachedSubtitleCamera, resolvedCamera))
-		{
-			_cachedSubtitleCamera = resolvedCamera;
-			_overlay.SetCamera(resolvedCamera);
-		}
-
-		_nextCameraResolveTime = Time.unscaledTime + CameraResolveIntervalSeconds;
 	}
 
 	private static SubtitleCue? FindActiveCue(List<SubtitleCue> cues, float beat)

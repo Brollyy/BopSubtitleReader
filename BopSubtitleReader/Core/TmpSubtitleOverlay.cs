@@ -121,39 +121,6 @@ public sealed class TmpSubtitleOverlay
 		}
 	}
 
-	public void SetCamera(Camera? camera)
-	{
-		if (!EnsureInitialized() || _canvas is null)
-		{
-			return;
-		}
-
-		if (camera is not null)
-		{
-			if (_canvas.renderMode != RenderMode.ScreenSpaceCamera)
-			{
-				_canvas.renderMode = RenderMode.ScreenSpaceCamera;
-			}
-
-			if (!ReferenceEquals(_canvas.worldCamera, camera))
-			{
-				_canvas.worldCamera = camera;
-			}
-
-			return;
-		}
-
-		if (_canvas.renderMode != RenderMode.ScreenSpaceOverlay)
-		{
-			_canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-		}
-
-		if (_canvas.worldCamera is not null)
-		{
-			_canvas.worldCamera = null;
-		}
-	}
-
 	private bool EnsureInitialized()
 	{
 		if (_available)
@@ -170,6 +137,9 @@ public sealed class TmpSubtitleOverlay
 
 		var canvasObject = new GameObject("BOP_SubtitleCanvas");
 		Object.DontDestroyOnLoad(canvasObject);
+		// Place on the UI layer so that game-world cameras (and their post-processing
+		// effects such as BopVisualEffects) cannot affect the subtitle canvas.
+		canvasObject.layer = 5; // Unity built-in "UI" layer
 
 		var canvas = canvasObject.AddComponent<Canvas>();
 		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
