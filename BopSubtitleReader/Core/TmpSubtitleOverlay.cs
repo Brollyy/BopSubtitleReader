@@ -15,6 +15,8 @@ public sealed class TmpSubtitleOverlay
 	private bool _initializationAttempted;
 	private bool _available;
 	private GameObject? _host;
+	private GameObject? _cameraHost;
+	private Camera? _overlayCamera;
 	private Canvas? _canvas;
 	private TextMeshProUGUI? _tmpText;
 	private RectTransform? _tmpRect;
@@ -121,6 +123,24 @@ public sealed class TmpSubtitleOverlay
 		}
 	}
 
+	/// <summary>
+	/// Syncs the subtitle overlay camera's viewport to match <paramref name="referenceCamera"/>'s
+	/// viewport rect so that subtitles are confined to the same on-screen area (important when
+	/// the game camera is not full-screen, e.g. in the Bits &amp; Bops editor).
+	/// Pass <c>null</c> to reset to a full-screen viewport.
+	/// </summary>
+	public void SetReferenceCamera(Camera? referenceCamera)
+	{
+		if (_overlayCamera is null)
+		{
+			return;
+		}
+
+		_overlayCamera.rect = referenceCamera
+			? referenceCamera.rect
+			: new Rect(0f, 0f, 1f, 1f);
+	}
+
 	private bool EnsureInitialized()
 	{
 		if (_available)
@@ -135,14 +155,30 @@ public sealed class TmpSubtitleOverlay
 
 		_initializationAttempted = true;
 
+		// Create a dedicated overlay camera for the subtitle canvas.
+		// Using a separate camera (not the game camera) prevents any post-processing effects
+		// such as BopVisualEffects from being applied to the subtitle canvas.
+		// Using ScreenSpaceCamera (rather than ScreenSpaceOverlay) ensures the canvas viewport
+		// tracks the game camera's viewport rect, which is important in the editor where the
+		// game view is not full-screen.
+		var cameraHost = new GameObject("BOP_SubtitleCameraHost");
+		Object.DontDestroyOnLoad(cameraHost);
+		var overlayCamera = cameraHost.AddComponent<Camera>();
+		overlayCamera.clearFlags = CameraClearFlags.Depth;
+		overlayCamera.cullingMask = 0; // Render nothing from the 3D scene; only the canvas
+		overlayCamera.depth = 100;     // Render after the main game camera
+		overlayCamera.rect = new Rect(0f, 0f, 1f, 1f);
+		_cameraHost = cameraHost;
+		_overlayCamera = overlayCamera;
+
 		var canvasObject = new GameObject("BOP_SubtitleCanvas");
 		Object.DontDestroyOnLoad(canvasObject);
-		// Place on the UI layer so that game-world cameras (and their post-processing
-		// effects such as BopVisualEffects) cannot affect the subtitle canvas.
+		// Place on the UI layer so that game-world cameras cannot accidentally render it.
 		canvasObject.layer = 5; // Unity built-in "UI" layer
 
 		var canvas = canvasObject.AddComponent<Canvas>();
-		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+		canvas.renderMode = RenderMode.ScreenSpaceCamera;
+		canvas.worldCamera = overlayCamera;
 		canvas.sortingOrder = 100;
 		_canvas = canvas;
 
