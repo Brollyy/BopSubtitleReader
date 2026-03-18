@@ -30,7 +30,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private MixtapeLoaderCustom? _loader;
 	private SubtitleConfig? _config;
 	private bool _timingResolved;
-	private float _resolvedPlaybackRate = 1f;
 	private string _displayText = string.Empty;
 	private string _displayStyleKey = string.Empty;
 
@@ -68,7 +67,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
-		_resolvedPlaybackRate = 1f;
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
 		_cachedKaraokeBeat = float.NaN;
@@ -88,7 +86,6 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_displayText = string.Empty;
 		_displayStyleKey = string.Empty;
 		_timingResolved = false;
-		_resolvedPlaybackRate = 1f;
 		_cachedKaraokeCue = null;
 		_cachedActiveSegmentIndex = -1;
 		_cachedKaraokeBeat = float.NaN;
@@ -121,18 +118,13 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		RefreshSubtitleCamera();
 
-		var playbackRate = GetJukeboxPlaybackRate(jukebox);
-		if (!_timingResolved || !Mathf.Approximately(playbackRate, _resolvedPlaybackRate))
+		if (!_timingResolved)
 		{
-			ResolveCueTiming(_track, jukebox, playbackRate);
-			_resolvedPlaybackRate = playbackRate;
+			ResolveCueTiming(_track, jukebox);
 			_timingResolved = true;
-			_activeCue = null;
-			_cachedKaraokeCue = null;
-			_cachedActiveSegmentIndex = -1;
 		}
 
-		var beat = jukebox.CurrentBeat;
+		var beat = GetContentBeat(jukebox);
 		var cue = FindActiveCue(_track.Cues, beat);
 		if (cue == _activeCue)
 		{
@@ -258,21 +250,21 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			$"{style.FontName}|{fontSize}|{style.ColorHexRgba}|{style.SecondaryColorHexRgba}|{style.OutlineColorHexRgba}|{style.OutlineWidth}|{style.Bold}|{style.Italic}|{style.Alignment}";
 	}
 
-	private static void ResolveCueTiming(SubtitleTrack track, JukeboxScript jukebox, float playbackRate)
+	private static void ResolveCueTiming(SubtitleTrack track, JukeboxScript jukebox)
 	{
 		foreach (var cue in track.Cues)
 		{
 			if (cue.UsesSecondsTiming && cue is { StartSeconds: not null, EndSeconds: not null })
 			{
-				cue.StartBeat = jukebox.SecondsToBeats(cue.StartSeconds.Value / playbackRate);
-				cue.EndBeat = jukebox.SecondsToBeats(cue.EndSeconds.Value / playbackRate);
+				cue.StartBeat = jukebox.SecondsToBeats(cue.StartSeconds.Value);
+				cue.EndBeat = jukebox.SecondsToBeats(cue.EndSeconds.Value);
 			}
 
 			foreach (var segment in cue.KaraokeSegments)
 			{
-				if (segment.Seconds.HasValue)
+				if (!segment.Beat.HasValue && segment.Seconds.HasValue)
 				{
-					segment.Beat = jukebox.SecondsToBeats(segment.Seconds.Value / playbackRate);
+					segment.Beat = jukebox.SecondsToBeats(segment.Seconds.Value);
 				}
 			}
 		}
@@ -280,15 +272,23 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		track.Cues.Sort((a, b) => a.StartBeat.CompareTo(b.StartBeat));
 	}
 
-	private static float GetJukeboxPlaybackRate(JukeboxScript jukebox)
+	/// <summary>
+	/// Returns the current beat corresponding to the actual audio content position.
+	/// <c>JukeboxScript.CurrentBeat</c> advances based on wall-clock time and does not
+	/// account for <c>AudioSource.pitch</c>, so at non-1× playback rates it drifts from
+	/// the audio. Deriving the beat from <c>AudioSource.time</c> (which always reflects
+	/// the true content position regardless of pitch) keeps subtitles synchronised at
+	/// any editor playback rate.
+	/// </summary>
+	private static float GetContentBeat(JukeboxScript jukebox)
 	{
 		var audioSource = jukebox.GetComponent<AudioSource>();
-		if (!audioSource)
+		if (audioSource && audioSource.clip)
 		{
-			return 1f;
+			return jukebox.SecondsToBeats(audioSource.time);
 		}
 
-		return Mathf.Max(Mathf.Abs(audioSource.pitch), 0.01f);
+		return jukebox.CurrentBeat;
 	}
 
 	private void RefreshSubtitleCamera(bool force = false)
