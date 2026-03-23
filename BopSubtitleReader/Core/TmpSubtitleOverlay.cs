@@ -11,11 +11,12 @@ namespace BopSubtitleReader.Core;
 public sealed class TmpSubtitleOverlay
 {
 	private static readonly ClassLogger Log = ClassLogger.GetForClass<TmpSubtitleOverlay>();
+	private const int UiLayer = 5; // Unity built-in "UI" layer
 
 	private bool _initializationAttempted;
 	private bool _available;
 	private GameObject? _host;
-	private Canvas? _canvas;
+	private Camera? _overlayCamera;
 	private TextMeshProUGUI? _tmpText;
 	private RectTransform? _tmpRect;
 	private GameObject? _karaokeLayer;
@@ -121,37 +122,33 @@ public sealed class TmpSubtitleOverlay
 		}
 	}
 
-	public void SetCamera(Camera? camera)
+	/// <summary>
+	/// Syncs the subtitle overlay camera's viewport to match <paramref name="referenceCamera"/>'s
+	/// viewport rect so that subtitles are confined to the same on-screen area (important when
+	/// the game camera is not full-screen, e.g. in the Bits &amp; Bops editor).
+	/// Pass <c>null</c> to reset to a full-screen viewport.
+	/// </summary>
+	public void SetReferenceCamera(Camera? referenceCamera)
 	{
-		if (!EnsureInitialized() || _canvas is null)
+		if (!EnsureInitialized() || _overlayCamera is null)
 		{
 			return;
 		}
 
-		if (camera is not null)
+		if (referenceCamera is null)
 		{
-			if (_canvas.renderMode != RenderMode.ScreenSpaceCamera)
-			{
-				_canvas.renderMode = RenderMode.ScreenSpaceCamera;
-			}
-
-			if (!ReferenceEquals(_canvas.worldCamera, camera))
-			{
-				_canvas.worldCamera = camera;
-			}
-
+			_overlayCamera.targetDisplay = 0;
+			_overlayCamera.targetTexture = null;
+			_overlayCamera.rect = new Rect(0f, 0f, 1f, 1f);
+			_overlayCamera.pixelRect = new Rect(0f, 0f, Screen.width, Screen.height);
 			return;
 		}
 
-		if (_canvas.renderMode != RenderMode.ScreenSpaceOverlay)
-		{
-			_canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-		}
-
-		if (_canvas.worldCamera is not null)
-		{
-			_canvas.worldCamera = null;
-		}
+		// Mirror display + render target so subtitles render in the same output surface as gameplay.
+		_overlayCamera.targetDisplay = referenceCamera.targetDisplay;
+		_overlayCamera.targetTexture = referenceCamera.targetTexture;
+		_overlayCamera.rect = referenceCamera.rect;
+		_overlayCamera.pixelRect = referenceCamera.pixelRect;
 	}
 
 	private bool EnsureInitialized()
@@ -168,15 +165,33 @@ public sealed class TmpSubtitleOverlay
 
 		_initializationAttempted = true;
 
+		// Create a dedicated overlay camera for the subtitle canvas.
+		// Using a separate camera (not the game camera) prevents any post-processing effects
+		// such as BopVisualEffects from being applied to the subtitle canvas.
+		// Using ScreenSpaceCamera (rather than ScreenSpaceOverlay) ensures the canvas viewport
+		// tracks the game camera's viewport rect, which is important in the editor where the
+		// game view is not full-screen.
+		var cameraHost = new GameObject("BOP_SubtitleCameraHost");
+		Object.DontDestroyOnLoad(cameraHost);
+		var overlayCamera = cameraHost.AddComponent<Camera>();
+		overlayCamera.clearFlags = CameraClearFlags.Depth;
+		overlayCamera.cullingMask = 1 << UiLayer; // Render only the UI layer for the subtitle canvas
+		overlayCamera.depth = 100;     // Render after the main game camera
+		overlayCamera.rect = new Rect(0f, 0f, 1f, 1f);
+		_overlayCamera = overlayCamera;
+
 		var canvasObject = new GameObject("BOP_SubtitleCanvas");
 		Object.DontDestroyOnLoad(canvasObject);
+		// Place on the UI layer so that game-world cameras cannot accidentally render it.
+		canvasObject.layer = UiLayer;
 
 		var canvas = canvasObject.AddComponent<Canvas>();
-		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+		canvas.renderMode = RenderMode.ScreenSpaceCamera;
+		canvas.worldCamera = overlayCamera;
 		canvas.sortingOrder = 100;
-		_canvas = canvas;
 
 		var textObject = new GameObject("BOP_SubtitleText");
+		textObject.layer = UiLayer;
 		textObject.transform.SetParent(canvasObject.transform, false);
 
 		var rect = textObject.AddComponent<RectTransform>();
@@ -538,6 +553,7 @@ public sealed class TmpSubtitleOverlay
 		}
 
 		_karaokeLayer = new GameObject("BOP_KaraokeLayer");
+		_karaokeLayer.layer = UiLayer;
 		_karaokeLayer.transform.SetParent(_tmpText.transform, false);
 		var rect = _karaokeLayer.AddComponent<RectTransform>();
 		rect.anchorMin = new Vector2(0f, 0f);
@@ -557,6 +573,7 @@ public sealed class TmpSubtitleOverlay
 			}
 
 			var rootGo = new GameObject($"KaraokeSeg_{_karaokeTextPool.Count:D2}");
+			rootGo.layer = UiLayer;
 			rootGo.transform.SetParent(_karaokeLayer.transform, false);
 			var rootRect = rootGo.AddComponent<RectTransform>();
 			rootRect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -565,6 +582,7 @@ public sealed class TmpSubtitleOverlay
 			rootRect.anchoredPosition = Vector2.zero;
 
 			var baseGo = new GameObject("Base");
+			baseGo.layer = UiLayer;
 			baseGo.transform.SetParent(rootGo.transform, false);
 			var baseRect = baseGo.AddComponent<RectTransform>();
 			baseRect.anchorMin = new Vector2(0f, 0f);
@@ -581,6 +599,7 @@ public sealed class TmpSubtitleOverlay
 			}
 
 			var maskGo = new GameObject("FillMask");
+			maskGo.layer = UiLayer;
 			maskGo.transform.SetParent(rootGo.transform, false);
 			var maskRect = maskGo.AddComponent<RectTransform>();
 			maskRect.anchorMin = new Vector2(0f, 0f);
@@ -590,6 +609,7 @@ public sealed class TmpSubtitleOverlay
 			maskGo.AddComponent<RectMask2D>();
 
 			var fillGo = new GameObject("Fill");
+			fillGo.layer = UiLayer;
 			fillGo.transform.SetParent(maskGo.transform, false);
 			var fillRect = fillGo.AddComponent<RectTransform>();
 			fillRect.anchorMin = new Vector2(0f, 0f);
