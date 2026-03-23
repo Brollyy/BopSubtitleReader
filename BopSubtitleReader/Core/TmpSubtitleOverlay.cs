@@ -11,13 +11,12 @@ namespace BopSubtitleReader.Core;
 public sealed class TmpSubtitleOverlay
 {
 	private static readonly ClassLogger Log = ClassLogger.GetForClass<TmpSubtitleOverlay>();
+	private const int UiLayer = 5; // Unity built-in "UI" layer
 
 	private bool _initializationAttempted;
 	private bool _available;
 	private GameObject? _host;
-	private GameObject? _cameraHost;
 	private Camera? _overlayCamera;
-	private Canvas? _canvas;
 	private TextMeshProUGUI? _tmpText;
 	private RectTransform? _tmpRect;
 	private GameObject? _karaokeLayer;
@@ -131,14 +130,25 @@ public sealed class TmpSubtitleOverlay
 	/// </summary>
 	public void SetReferenceCamera(Camera? referenceCamera)
 	{
-		if (_overlayCamera is null)
+		if (!EnsureInitialized() || _overlayCamera is null)
 		{
 			return;
 		}
 
-		_overlayCamera.rect = referenceCamera
-			? referenceCamera.rect
-			: new Rect(0f, 0f, 1f, 1f);
+		if (referenceCamera is null)
+		{
+			_overlayCamera.targetDisplay = 0;
+			_overlayCamera.targetTexture = null;
+			_overlayCamera.rect = new Rect(0f, 0f, 1f, 1f);
+			_overlayCamera.pixelRect = new Rect(0f, 0f, Screen.width, Screen.height);
+			return;
+		}
+
+		// Mirror display + render target so subtitles render in the same output surface as gameplay.
+		_overlayCamera.targetDisplay = referenceCamera.targetDisplay;
+		_overlayCamera.targetTexture = referenceCamera.targetTexture;
+		_overlayCamera.rect = referenceCamera.rect;
+		_overlayCamera.pixelRect = referenceCamera.pixelRect;
 	}
 
 	private bool EnsureInitialized()
@@ -165,24 +175,23 @@ public sealed class TmpSubtitleOverlay
 		Object.DontDestroyOnLoad(cameraHost);
 		var overlayCamera = cameraHost.AddComponent<Camera>();
 		overlayCamera.clearFlags = CameraClearFlags.Depth;
-		overlayCamera.cullingMask = 0; // Render nothing from the 3D scene; only the canvas
+		overlayCamera.cullingMask = 1 << UiLayer; // Render only the UI layer for the subtitle canvas
 		overlayCamera.depth = 100;     // Render after the main game camera
 		overlayCamera.rect = new Rect(0f, 0f, 1f, 1f);
-		_cameraHost = cameraHost;
 		_overlayCamera = overlayCamera;
 
 		var canvasObject = new GameObject("BOP_SubtitleCanvas");
 		Object.DontDestroyOnLoad(canvasObject);
 		// Place on the UI layer so that game-world cameras cannot accidentally render it.
-		canvasObject.layer = 5; // Unity built-in "UI" layer
+		canvasObject.layer = UiLayer;
 
 		var canvas = canvasObject.AddComponent<Canvas>();
 		canvas.renderMode = RenderMode.ScreenSpaceCamera;
 		canvas.worldCamera = overlayCamera;
 		canvas.sortingOrder = 100;
-		_canvas = canvas;
 
 		var textObject = new GameObject("BOP_SubtitleText");
+		textObject.layer = UiLayer;
 		textObject.transform.SetParent(canvasObject.transform, false);
 
 		var rect = textObject.AddComponent<RectTransform>();
@@ -544,6 +553,7 @@ public sealed class TmpSubtitleOverlay
 		}
 
 		_karaokeLayer = new GameObject("BOP_KaraokeLayer");
+		_karaokeLayer.layer = UiLayer;
 		_karaokeLayer.transform.SetParent(_tmpText.transform, false);
 		var rect = _karaokeLayer.AddComponent<RectTransform>();
 		rect.anchorMin = new Vector2(0f, 0f);
@@ -563,6 +573,7 @@ public sealed class TmpSubtitleOverlay
 			}
 
 			var rootGo = new GameObject($"KaraokeSeg_{_karaokeTextPool.Count:D2}");
+			rootGo.layer = UiLayer;
 			rootGo.transform.SetParent(_karaokeLayer.transform, false);
 			var rootRect = rootGo.AddComponent<RectTransform>();
 			rootRect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -571,6 +582,7 @@ public sealed class TmpSubtitleOverlay
 			rootRect.anchoredPosition = Vector2.zero;
 
 			var baseGo = new GameObject("Base");
+			baseGo.layer = UiLayer;
 			baseGo.transform.SetParent(rootGo.transform, false);
 			var baseRect = baseGo.AddComponent<RectTransform>();
 			baseRect.anchorMin = new Vector2(0f, 0f);
@@ -587,6 +599,7 @@ public sealed class TmpSubtitleOverlay
 			}
 
 			var maskGo = new GameObject("FillMask");
+			maskGo.layer = UiLayer;
 			maskGo.transform.SetParent(rootGo.transform, false);
 			var maskRect = maskGo.AddComponent<RectTransform>();
 			maskRect.anchorMin = new Vector2(0f, 0f);
@@ -596,6 +609,7 @@ public sealed class TmpSubtitleOverlay
 			maskGo.AddComponent<RectMask2D>();
 
 			var fillGo = new GameObject("Fill");
+			fillGo.layer = UiLayer;
 			fillGo.transform.SetParent(maskGo.transform, false);
 			var fillRect = fillGo.AddComponent<RectTransform>();
 			fillRect.anchorMin = new Vector2(0f, 0f);

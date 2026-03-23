@@ -39,6 +39,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 	private int _cachedActiveSegmentIndex = -1;
 	private float _cachedKaraokeBeat = float.NaN;
 	private Camera? _cachedSubtitleCamera;
+	private CameraViewportState? _cachedSubtitleViewportState;
 	private float _nextCameraResolveTime;
 	private const float CameraResolveIntervalSeconds = 0.5f;
 	public bool HasActiveSession => _track is not null && _loader is not null && _config is not null;
@@ -71,6 +72,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_cachedActiveSegmentIndex = -1;
 		_cachedKaraokeBeat = float.NaN;
 		_cachedSubtitleCamera = null;
+		_cachedSubtitleViewportState = null;
 		_nextCameraResolveTime = 0f;
 		RefreshSubtitleCamera(force: true);
 		_overlay.Hide();
@@ -90,6 +92,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		_cachedActiveSegmentIndex = -1;
 		_cachedKaraokeBeat = float.NaN;
 		_cachedSubtitleCamera = null;
+		_cachedSubtitleViewportState = null;
 		_nextCameraResolveTime = 0f;
 		_overlay.Hide();
 	}
@@ -290,9 +293,14 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		}
 
 		var resolvedCamera = ResolveSubtitleCamera(_loader);
-		if (force || !ReferenceEquals(_cachedSubtitleCamera, resolvedCamera))
+		var resolvedViewportState = CameraViewportState.Capture(resolvedCamera);
+		var cameraChanged = !ReferenceEquals(_cachedSubtitleCamera, resolvedCamera);
+		var viewportChanged = !_cachedSubtitleViewportState.HasValue
+			|| !CameraViewportState.AreEquivalent(_cachedSubtitleViewportState.Value, resolvedViewportState);
+		if (force || cameraChanged || viewportChanged)
 		{
 			_cachedSubtitleCamera = resolvedCamera;
+			_cachedSubtitleViewportState = resolvedViewportState;
 			_overlay.SetReferenceCamera(resolvedCamera);
 		}
 
@@ -628,6 +636,45 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		}
 
 		return value.Substring(0, max) + "...";
+	}
+
+	private readonly struct CameraViewportState
+	{
+		public CameraViewportState(Rect rect, Rect pixelRect, RenderTexture? targetTexture)
+		{
+			Rect = rect;
+			PixelRect = pixelRect;
+			TargetTexture = targetTexture;
+		}
+
+		public Rect Rect { get; }
+		public Rect PixelRect { get; }
+		public RenderTexture? TargetTexture { get; }
+
+		public static CameraViewportState Capture(Camera? camera)
+		{
+			return camera is null
+				? new CameraViewportState(
+					new Rect(0f, 0f, 1f, 1f),
+					new Rect(0f, 0f, Screen.width, Screen.height),
+					null)
+				: new CameraViewportState(camera.rect, camera.pixelRect, camera.targetTexture);
+		}
+
+		public static bool AreEquivalent(CameraViewportState left, CameraViewportState right)
+		{
+			return AreRectsApproximatelyEqual(left.Rect, right.Rect)
+				&& AreRectsApproximatelyEqual(left.PixelRect, right.PixelRect)
+				&& ReferenceEquals(left.TargetTexture, right.TargetTexture);
+		}
+
+		private static bool AreRectsApproximatelyEqual(Rect a, Rect b)
+		{
+			return Mathf.Approximately(a.x, b.x)
+				&& Mathf.Approximately(a.y, b.y)
+				&& Mathf.Approximately(a.width, b.width)
+				&& Mathf.Approximately(a.height, b.height);
+		}
 	}
 
 }
