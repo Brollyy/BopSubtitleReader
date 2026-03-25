@@ -17,6 +17,12 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 		AccessTools.FieldRefAccess<MixtapeLoaderCustom, SceneKey[]>("sceneKeys");
 	private static readonly AccessTools.FieldRef<MixtapeLoaderCustom, Dictionary<SceneKey, GameplayScript>> ScriptsRef =
 		AccessTools.FieldRefAccess<MixtapeLoaderCustom, Dictionary<SceneKey, GameplayScript>>("scripts");
+	private static readonly AccessTools.FieldRef<MixtapeLoaderCustom, RiqLoader?> RiqLoaderRef =
+		AccessTools.FieldRefAccess<MixtapeLoaderCustom, RiqLoader?>("riqLoader");
+	private static readonly AccessTools.FieldRef<RiqLoader, Mixtape?> RiqLoaderMixtapeRef =
+		AccessTools.FieldRefAccess<RiqLoader, Mixtape?>("mixtape");
+	private static readonly AccessTools.FieldRef<MixtapeEditorScript, MixtapeEventScript?> MixtapePropertiesEventRef =
+		AccessTools.FieldRefAccess<MixtapeEditorScript, MixtapeEventScript?>("mixtapePropertiesEvent");
 
 	// Sentinel stored in _displayText while the karaoke overlay is actively rendering.
 	private const string KaraokeActiveSentinel = "__KARAOKE_ACTIVE__";
@@ -123,7 +129,7 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 
 		if (!_timingResolved)
 		{
-			ResolveCueTiming(_track, jukebox);
+			ResolveCueTiming(_track, _loader, jukebox);
 			_timingResolved = true;
 		}
 
@@ -253,26 +259,103 @@ public sealed class SubtitleRuntimeController : MonoBehaviour
 			$"{style.FontName}|{fontSize}|{style.ColorHexRgba}|{style.SecondaryColorHexRgba}|{style.OutlineColorHexRgba}|{style.OutlineWidth}|{style.Bold}|{style.Italic}|{style.Alignment}";
 	}
 
-	private static void ResolveCueTiming(SubtitleTrack track, JukeboxScript jukebox)
+	private static void ResolveCueTiming(SubtitleTrack track, MixtapeLoaderCustom loader, JukeboxScript jukebox)
 	{
+		var playbackRate = ResolvePlaybackRate(loader, jukebox);
+		var secondsBeatScale = Mathf.Approximately(playbackRate, 0f) ? 1f : 1f / playbackRate;
+		Log.Info(
+			$"Resolving cue timing for mixtape using {jukebox.Bpm} BPM (playbackSpeed={playbackRate.ToString("F3", CultureInfo.InvariantCulture)})");
 		foreach (var cue in track.Cues)
 		{
 			if (cue.UsesSecondsTiming && cue is { StartSeconds: not null, EndSeconds: not null })
 			{
-				cue.StartBeat = jukebox.SecondsToBeats(cue.StartSeconds.Value);
-				cue.EndBeat = jukebox.SecondsToBeats(cue.EndSeconds.Value);
+				cue.StartBeat = ResolveSecondsToBeat(jukebox, cue.StartSeconds.Value, secondsBeatScale);
+				cue.EndBeat = ResolveSecondsToBeat(jukebox, cue.EndSeconds.Value, secondsBeatScale);
 			}
 
 			foreach (var segment in cue.KaraokeSegments)
 			{
 				if (!segment.Beat.HasValue && segment.Seconds.HasValue)
 				{
-					segment.Beat = jukebox.SecondsToBeats(segment.Seconds.Value);
+					segment.Beat = ResolveSecondsToBeat(jukebox, segment.Seconds.Value, secondsBeatScale);
 				}
 			}
 		}
 
 		track.Cues.Sort((a, b) => a.StartBeat.CompareTo(b.StartBeat));
+	}
+
+	private static float ResolveSecondsToBeat(JukeboxScript jukebox, double seconds, float secondsBeatScale)
+	{
+		return jukebox.SecondsToBeats(seconds) * secondsBeatScale;
+	}
+
+	private static float ResolvePlaybackRate(MixtapeLoaderCustom? loader, JukeboxScript jukebox)
+	{
+		if (!TryGetBaseMixtapeBpm(loader, out var baseBpm, out var source))
+		{
+			Log.Info("ResolvePlaybackRate: base mixtape BPM unavailable; defaulting to 1.000");
+			return 1f;
+		}
+
+		var playbackRate = jukebox.bpm / baseBpm;
+		Log.Info(
+			$"ResolvePlaybackRate: {jukebox.bpm.ToString("F3", CultureInfo.InvariantCulture)} / {baseBpm.ToString("F3", CultureInfo.InvariantCulture)} ({source})");
+		return playbackRate > 0f ? playbackRate : 1f;
+	}
+
+	private static bool TryGetBaseMixtapeBpm(MixtapeLoaderCustom? loader, out float baseBpm, out string source)
+	{
+		baseBpm = 0f;
+		source = "none";
+
+		if (loader is not null && loader)
+		{
+			var riqLoader = RiqLoaderRef(loader);
+			if (riqLoader is not null && riqLoader)
+			{
+				var loadedMixtape = RiqLoaderMixtapeRef(riqLoader);
+				if (loadedMixtape is not null && loadedMixtape.bpm > 0f)
+				{
+					baseBpm = loadedMixtape.bpm;
+					source = "riqLoader.mixtape";
+					return true;
+				}
+			}
+		}
+
+		if (!MixtapeEditorScript.IsInEditor)
+		{
+			return false;
+		}
+
+		var editor = FindObjectOfType<MixtapeEditorScript>();
+		if (editor is null || !editor)
+		{
+			return false;
+		}
+
+		var mixtapePropertiesEvent = MixtapePropertiesEventRef(editor);
+		if (mixtapePropertiesEvent is null || !mixtapePropertiesEvent)
+		{
+			return false;
+		}
+
+		var entity = mixtapePropertiesEvent.Entity;
+		if (entity is null)
+		{
+			return false;
+		}
+
+		var editorBpm = entity.GetFloat("bpm");
+		if (editorBpm <= 0f)
+		{
+			return false;
+		}
+
+		baseBpm = editorBpm;
+		source = "MixtapeEditorScript.mixtapePropertiesEvent";
+		return true;
 	}
 
 	private void RefreshSubtitleCamera(bool force = false)
